@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"><meta name="theme-color" content="#050a12"><title>Bursa Ride 3D</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050a12;color:#fff;font-family:Arial,system-ui,sans-serif;touch-action:none;user-select:none}canvas{position:fixed;inset:0;width:100%;height:100%;display:block}.hud{position:fixed;z-index:3;pointer-events:none;text-shadow:0 2px 5px #000}.top{top:12px;left:14px;right:14px;display:flex;justify-content:space-between;align-items:flex-start}.pill{background:#07111dcc;border:1px solid #7beaff66;border-radius:12px;padding:8px 12px;backdrop-filter:blur(8px);font-weight:700}.speed{font-size:clamp(25px,5vw,42px);line-height:1}.unit{font-size:10px;color:#9bb7c8;letter-spacing:2px}.gear{font-size:20px;color:#63efff}.bottom{position:fixed;inset:auto 0 0 0;height:37%;z-index:4;pointer-events:none}.pad{position:absolute;bottom:16px;width:26vw;height:24vw;max-width:120px;max-height:105px;border-radius:20px;border:1px solid #8defff88;background:linear-gradient(145deg,#0d2234bb,#07111dcc);color:#fff;font-weight:800;font-size:clamp(12px,2.3vw,18px);pointer-events:auto;display:grid;place-items:center;box-shadow:0 0 18px #00d9ff22;touch-action:none}.left{left:14px}.right{left:calc(14px + min(26vw,120px) + 10px)}.brake{right:calc(14px + min(26vw,120px) + 10px);border-color:#ff8a7c88}.gas{right:14px;border-color:#65ffbd99;background:linear-gradient(145deg,#0d3b36dd,#071b20ee)}.small{height:42px;width:64px;max-width:none;max-height:none;bottom:calc(16px + min(24vw,105px) + 10px);font-size:12px;border-radius:12px}.up{right:90px}.down{right:14px}.toggle{position:fixed;top:12px;right:50%;transform:translateX(50%);z-index:5;pointer-events:auto;border:1px solid #6defff88;background:#07111dcc;color:white;border-radius:12px;padding:9px 12px;font-weight:700}.hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:3;font-size:10px;color:#c4d9e4;text-shadow:0 2px 4px #000;white-space:nowrap;pointer-events:none}.overlay{position:fixed;inset:0;z-index:10;background:radial-gradient(ellipse at 50% 35%,#17364c,#03070d 70%);display:flex;align-items:center;justify-content:center;text-align:center;padding:24px}.panel{max-width:520px}.panel h1{font-size:clamp(34px,8vw,64px);letter-spacing:2px;margin:0 0 8px;color:#d9faff}.panel p{color:#a8c2d1;line-height:1.5}.start{border:0;border-radius:14px;padding:15px 42px;background:linear-gradient(90deg,#00c9ed,#45ffc2);color:#00121b;font-size:18px;font-weight:900}.weather{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:5;pointer-events:auto;background:#07111dcc;border:1px solid #6defff66;color:white;border-radius:10px;padding:8px;font-size:11px}.hide{display:none!important}#featurePanel .start{display:block;width:100%;margin:8px 0;padding:12px;font-size:14px}
+</style></head><body>
+<div id="overlay" class="overlay"><div class="panel"><h1>BURSA RIDE 3D</h1><p>Birinci şahıs motosiklet sürüşü<br>3D motosiklet · Şehir · Trafik · Serbest sürüş</p><button id="start" class="start" onclick="document.getElementById('overlay').classList.add('hide');window.__rideStarted=true">SÜRÜŞE BAŞLA</button><p style="font-size:11px">En iyi deneyim için telefonu yatay tut.</p></div></div>
+<div class="hud top"><div class="pill"><div class="speed"><span id="speed">0</span><span style="font-size:14px"> km/h</span></div><div class="unit">HIZ</div></div><div class="pill" style="text-align:right"><div class="gear">VİTES <span id="gear">1</span></div><div class="unit"><span id="mode">OTOMATİK</span> · <span id="rpm">1200</span> RPM</div></div></div>
+<button class="weather" id="weather">☀ GÜNDÜZ</button><button class="toggle" id="manual">VİTES: OTOMATİK</button>
+<button class="weather" id="features" style="top:58px;left:12px;transform:none">☰ MENÜ</button>
+<div id="featurePanel" class="overlay hide" style="z-index:9;align-items:flex-start;overflow:auto">
+ <div class="panel" style="width:min(560px,100%);background:#071421ee;border:1px solid #58dff577;border-radius:18px;padding:18px;text-align:left">
+ <h2 style="margin-top:0">BURSA RIDE · GARAJ</h2>
+ <p id="wallet">Bakiye: ₺5.000</p>
+ <button class="start" id="cameraMode">KAMERA: BİRİNCİ ŞAHIS</button>
+ <button class="start" id="garageColor">MOTOR RENGİ: MAVİ</button>
+ <button class="start" id="mission">GÖREV: ŞEHİR TURU · ₺500</button>
+ <button class="start" id="graphics">GRAFİK: YÜKSEK</button>
+ <button class="start" id="saveGame">OYUNU KAYDET</button>
+ <button class="start" id="closeFeatures">KAPAT</button>
+ <p id="gpsText">GPS: Bursa Merkez · Hedef: Şehir turu</p>
+ <p style="font-size:11px">Bu sürümde garaj ve görev menüsü prototiptir; gerçek Bursa yol ağı ve çevrimiçi trafik içermez.</p>
+ </div></div>
+<div class="bottom"><button class="pad left" id="left">◀ SOL</button><button class="pad right" id="right">SAĞ ▶</button><button class="pad brake" id="brake">FREN</button><button class="pad gas" id="gas">GAZ</button><button class="pad small up" id="up">VİTES +</button><button class="pad small down" id="down">VİTES −</button></div>
+<div class="hint">İki tarafa basılı tut: GAZ · İki parmağı yukarı kaydır: TEK TEKER</div>
+<script type="module">
+import * as THREE from 'three';
+import {OBJLoader} from 'three/addons/loaders/OBJLoader.js';
+import {MTLLoader} from 'three/addons/loaders/MTLLoader.js';
+const $=id=>document.getElementById(id);
+const {BoxGeometry,CylinderGeometry,SphereGeometry,PlaneGeometry}=THREE;
+const bulbs=[];
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x9bc8e8);scene.fog=new THREE.Fog(0x9bc8e8,45,260);
+const camera=new THREE.PerspectiveCamera(72,innerWidth/innerHeight,.05,700);camera.position.set(0,1.55,1.5);camera.rotation.order='YXZ';
+const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(devicePixelRatio,1.65));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.12;document.body.appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xc9e7ff,0x33402c,1.7));const sun=new THREE.DirectionalLight(0xfff1d6,2.5);sun.position.set(-35,70,25);sun.castShadow=true;sun.shadow.mapSize.set(1024,1024);sun.shadow.camera.left=-70;sun.shadow.camera.right=70;sun.shadow.camera.top=100;sun.shadow.camera.bottom=-100;scene.add(sun);
+const mat=(c,r=.8,m=0)=>new THREE.MeshStandardMaterial({color:c,roughness:r,metalness:m});
+const asphalt=mat(0x292f35,.95),lineMat=mat(0xe8e7db),sideMat=mat(0x777d80),concrete=mat(0xaaa9a2),glass= new THREE.MeshStandardMaterial({color:0x416276,roughness:.25,metalness:.3}),treeMat=mat(0x315c3a),trunkMat=mat(0x55402e);
+// Straight road and long repeated city blocks
+const road=new THREE.Mesh(new THREE.PlaneGeometry(18,700),asphalt);road.rotation.x=-Math.PI/2;road.position.z=-300;road.receiveShadow=true;scene.add(road);
+for(let x of [-9.25,9.25]){let curb=new THREE.Mesh(new THREE.BoxGeometry(.5,.22,700),sideMat);curb.position.set(x,.08,-300);curb.receiveShadow=true;scene.add(curb)}
+for(let x of [-8.7,8.7]){let stripe=new THREE.Mesh(new THREE.BoxGeometry(.12,.012,700),lineMat);stripe.position.set(x,.015,-300);scene.add(stripe)}
+for(let z=-12;z>-680;z-=14){let dash=new THREE.Mesh(new THREE.BoxGeometry(.16,.018,5.5),lineMat);dash.position.set(0,.025,z);scene.add(dash)}
+// procedural Bursa-inspired low/mid-rise blocks, shops and trees
+let seed=1987;const rand=()=>{seed=(seed*16807)%2147483647;return(seed-1)/2147483646};
+function building(x,z,w,h,d,idx){const colors=[0xb8b2a7,0xd1c8b8,0x9ba8ad,0xb4c2c4,0x8e9b9c,0xd4d0c6];let body=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat(colors[idx%colors.length],.88));body.position.set(x,h/2,z);body.castShadow=true;body.receiveShadow=true;scene.add(body);let roof=new THREE.Mesh(new THREE.BoxGeometry(w+.12,.18,d+.12),mat(0x555b60));roof.position.set(x,h+.08,z);scene.add(roof);
+for(let yy=2.1;yy<h-0.5;yy+=2.2)for(let xx=-w/2+.7;xx<w/2-.3;xx+=1.7){let win=new THREE.Mesh(new THREE.PlaneGeometry(.95,1.15),glass);win.position.set(x+xx,yy,z+d/2+.012);scene.add(win);let win2=win.clone();win2.position.z=z-d/2-.012;win2.rotation.y=Math.PI;scene.add(win2)}
+}
+for(let side of [-1,1])for(let z=-20;z>-650;z-=rand()*17+17){let dist=12+rand()*18,w=6+rand()*9,h=8+rand()*25,d=10+rand()*12;building(side*dist,z,w,h,d,Math.floor(rand()*6));if(rand()>.35){let tx=side*(10.5+rand()*2);let trunk=new THREE.Mesh(new CylinderGeometry(.18,.28,2.4,7),trunkMat);trunk.position.set(tx,1.2,z-7);scene.add(trunk);let crown=new THREE.Mesh(new THREE.SphereGeometry(1.7,9,7),treeMat);crown.position.set(tx,3.3,z-7);crown.scale.y=1.3;scene.add(crown)}}
+// street lamps and sign boards
+for(let side of [-1,1])for(let z=-25;z>-650;z-=35){let pole=new THREE.Mesh(new CylinderGeometry(.07,.1,6,8),mat(0x4a5155,.45,.6));pole.position.set(side*10.2,3,z);scene.add(pole);let arm=new THREE.Mesh(new BoxGeometry(1.5,.08,.08),mat(0x4a5155));arm.position.set(side*9.55,5.85,z);scene.add(arm);let bulb=new THREE.PointLight(0xffd89b,0,12);bulb.position.set(side*9,5.6,z);scene.add(bulb);bulbs.push(bulb)}
+function sign(x,z,label){let board=new THREE.Mesh(new BoxGeometry(3,.8,.12),mat(0x174c59,.4,.2));board.position.set(x,4.8,z);scene.add(board);const canvas=document.createElement('canvas');canvas.width=512;canvas.height=128;let c=canvas.getContext('2d');c.fillStyle='#f4fbff';c.font='bold 54px Arial';c.textAlign='center';c.fillText(label,256,83);let tex=new THREE.CanvasTexture(canvas);let face=new THREE.Mesh(new THREE.PlaneGeometry(2.85,.7),new THREE.MeshBasicMaterial({map:tex,transparent:true}));face.position.set(x,4.8,z+.07);scene.add(face)}
+sign(-8,-55,'BURSA · MERKEZ');sign(8,-245,'ŞEHİR İÇİ');sign(-8,-455,'BURSA');
+// Bike OBJ load; preserve supplied mesh, fit to plausible motorcycle dimensions
+const bikePivot=new THREE.Group();bikePivot.position.set(0,0,.8);scene.add(bikePivot);let bikeLoaded=false;
+new MTLLoader().load('./yehomaOBJ.mtl',mats=>{mats.preload();new OBJLoader().setMaterials(mats).load('./yehomaOBJ.obj',obj=>{const box=new THREE.Box3().setFromObject(obj),size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3());obj.position.sub(center);const scale=1.65/Math.max(size.x,size.z);obj.scale.setScalar(scale);obj.position.y=-box.min.y*scale;obj.traverse(n=>{if(n.isMesh){n.castShadow=true;n.receiveShadow=true;if(!n.material)n.material=mat(0x20242a);const ms=Array.isArray(n.material)?n.material:[n.material];for(const mm of ms){if(mm.color&&mm.color.r<.015&&mm.color.g<.015&&mm.color.b<.015)mm.color.setHex(/tire|rubber|lastik/i.test(mm.name)?0x171b20:0x77828c);if('metalness'in mm)mm.metalness=.48;if('roughness'in mm)mm.roughness=.38}}});bikePivot.add(obj);bikeLoaded=true;},undefined,e=>console.warn('OBJ yüklenemedi',e));},undefined,e=>{console.warn('MTL yüklenemedi',e);new OBJLoader().load('./yehomaOBJ.obj',o=>{bikePivot.add(o);bikeLoaded=true})});
+
+// Added 3D traffic and game systems
+const trafficCars=[];
+function makeCar(x,z,color){
+ const g=new THREE.Group();const body=new THREE.Mesh(new THREE.BoxGeometry(1.8,.62,3.5),mat(color,.45,.25));body.position.y=.62;body.castShadow=true;g.add(body);
+ const cabin=new THREE.Mesh(new THREE.BoxGeometry(1.45,.72,1.65),glass);cabin.position.set(0,1.25,-.12);g.add(cabin);
+ for(const sx of [-.68,.68])for(const zz of [-1.1,1.1]){const wh=new THREE.Mesh(new CylinderGeometry(.28,.28,.18,12),mat(0x151515));wh.rotation.z=Math.PI/2;wh.position.set(sx,.32,zz);g.add(wh)}
+ g.position.set(x,0,z);scene.add(g);trafficCars.push(g);
+}
+for(let i=0;i<9;i++)makeCar((i%2?5.1:-5.1),-65-i*67,[0xc83d35,0xd6d9dd,0x263c59,0xd1a83d][i%4]);
+let cameraThird=false, bikeColorIndex=0, graphicsHigh=true, money=5000, missionDone=false;
+const bikeColors=[0x1688ff,0xe52b35,0x17191d,0xe8e8e8,0x16a66a];
+function recolorBike(){
+ bikePivot.traverse(n=>{if(n.isMesh){const mats=Array.isArray(n.material)?n.material:[n.material];for(const m of mats){if(m.color && (m.name||'').toLowerCase().match(/body|paint|tank|fair/i))m.color.setHex(bikeColors[bikeColorIndex]);}}});
+}
+function updateWallet(){$('wallet').textContent='Bakiye: ₺'+money.toLocaleString('tr-TR')}
+$('features').onclick=()=>$('featurePanel').classList.remove('hide');
+$('closeFeatures').onclick=()=>$('featurePanel').classList.add('hide');
+$('cameraMode').onclick=()=>{cameraThird=!cameraThird;if(typeof cockpit!=='undefined')cockpit.visible=!cameraThird;$('cameraMode').textContent='KAMERA: '+(cameraThird?'ÜÇÜNCÜ ŞAHIS':'BİRİNCİ ŞAHIS')};
+$('garageColor').onclick=()=>{bikeColorIndex=(bikeColorIndex+1)%bikeColors.length;recolorBike();$('garageColor').textContent='MOTOR RENGİ: '+['MAVİ','KIRMIZI','SİYAH','BEYAZ','YEŞİL'][bikeColorIndex]};
+$('mission').onclick=()=>{if(!missionDone){missionDone=true;money+=500;updateWallet();$('mission').textContent='GÖREV TAMAMLANDI · +₺500';$('gpsText').textContent='GPS: Hedef tamamlandı · Bursa Merkez';}else{$('mission').textContent='GÖREV TAMAMLANDI'}};
+$('graphics').onclick=()=>{graphicsHigh=!graphicsHigh;renderer.setPixelRatio(Math.min(devicePixelRatio,graphicsHigh?1.65:1));renderer.shadowMap.enabled=graphicsHigh;$('graphics').textContent='GRAFİK: '+(graphicsHigh?'YÜKSEK':'DÜŞÜK')};
+$('saveGame').onclick=()=>{try{localStorage.setItem('bursaRideSave',JSON.stringify({money,weather,gear,bikeColorIndex,missionDone}));$('saveGame').textContent='KAYDEDİLDİ ✓'}catch(e){$('saveGame').textContent='KAYIT HATASI'}};
+try{const sv=JSON.parse(localStorage.getItem('bursaRideSave')||'null');if(sv){money=sv.money||5000;bikeColorIndex=sv.bikeColorIndex||0;missionDone=!!sv.missionDone;weather=sv.weather||0;gear=sv.gear||1;}}catch(e){}
+updateWallet();
+
+// visible cockpit/handlebars in rider view
+const cockpit=new THREE.Group();camera.add(cockpit);cockpit.position.set(0,-.45,-.82);const tank=new THREE.Mesh(new SphereGeometry(.48,24,16),mat(0x111820,.35,.55));tank.scale.set(.85,.42,1.3);tank.position.set(0,-.02,-.2);cockpit.add(tank);const bar=new THREE.Mesh(new CylinderGeometry(.045,.045,1.6,12),mat(0x15191d,.35,.7));bar.rotation.z=Math.PI/2;bar.position.set(0,.27,-.65);cockpit.add(bar);for(let s of [-1,1]){let grip=new THREE.Mesh(new CylinderGeometry(.09,.09,.38,12),mat(0x090b0e));grip.rotation.z=Math.PI/2;grip.position.set(s*.77,.27,-.65);cockpit.add(grip);let mirrorStem=new THREE.Mesh(new CylinderGeometry(.018,.018,.45,8),mat(0x343b42));mirrorStem.position.set(s*.57,.55,-.62);mirrorStem.rotation.z=s*.5;cockpit.add(mirrorStem);let mirror=new THREE.Mesh(new SphereGeometry(.13,12,8),mat(0x17232c,.2,.7));mirror.scale.set(1,.65,.18);mirror.position.set(s*.67,.72,-.55);cockpit.add(mirror)}
+const dash=new THREE.Mesh(new BoxGeometry(.48,.22,.06),mat(0x05090d,.3,.3));dash.position.set(0,.3,-.36);cockpit.add(dash);
+// weather / time
+const weatherGeo=new THREE.BufferGeometry();const weatherCount=520;const weatherPos=new Float32Array(weatherCount*3);for(let i=0;i<weatherCount;i++){weatherPos[i*3]=(Math.random()-.5)*34;weatherPos[i*3+1]=Math.random()*18;weatherPos[i*3+2]=-Math.random()*95;}weatherGeo.setAttribute('position',new THREE.BufferAttribute(weatherPos,3));const weatherPoints=new THREE.Points(weatherGeo,new THREE.PointsMaterial({color:0xcdeaff,size:.075,transparent:true,opacity:0.0}));scene.add(weatherPoints);
+let weather=0; // lights toggled below
+const modes=[{name:'☀ GÜNDÜZ',bg:0x9bc8e8,fog:0x9bc8e8,int:2.5},{name:'🌆 AKŞAM',bg:0x8d7892,fog:0x796a7b,int:1.3},{name:'🌙 NEON GECE',bg:0x070b20,fog:0x10152b,int:.28},{name:'🌧 YAĞMUR',bg:0x455667,fog:0x455667,int:.75},{name:'❄ KAR',bg:0xb9c7d1,fog:0xb9c7d1,int:1.1}];
+function setWeather(){let m=modes[weather];scene.background.setHex(m.bg);scene.fog.color.setHex(m.fog);sun.intensity=m.int;bulbs.forEach(b=>b.intensity=weather===2?2.3:weather===1?0.4:0);$('weather').textContent=m.name;weatherPoints.material.opacity=weather===3?.62:weather===4?.85:0;weatherPoints.material.size=weather===4?.11:.055}
+$('weather').onclick=()=>{weather=(weather+1)%modes.length;setWeather()};
+// controls and physics
+let gas=false,brake=false,left=false,right=false,manual=false,gear=1,speed=0,rpm=1200,wheelie=false,wheelieHold=false,steer=0,tilt=0,swipeStart=null;const maxSpeed=[0,45,78,112,148,182,220];
+function hold(id,fn){let el=$(id);el.addEventListener('pointerdown',e=>{e.preventDefault();el.setPointerCapture?.(e.pointerId);fn(true)});for(let ev of ['pointerup','pointercancel','lostpointercapture'])el.addEventListener(ev,e=>{e.preventDefault();fn(false)})}
+hold('gas',v=>gas=v);hold('brake',v=>brake=v);hold('left',v=>left=v);hold('right',v=>right=v);
+$('manual').onclick=()=>{manual=!manual;$('manual').textContent='VİTES: '+(manual?'MANUEL':'OTOMATİK');$('mode').textContent=manual?'MANUEL':'OTOMATİK'};
+$('up').onclick=()=>{manual=true;gear=Math.min(6,gear+1);$('manual').textContent='VİTES: MANUEL';$('mode').textContent='MANUEL'};$('down').onclick=()=>{manual=true;gear=Math.max(1,gear-1);$('manual').textContent='VİTES: MANUEL';$('mode').textContent='MANUEL'};
+// two-finger upward swipe activates wheelie while both fingers remain up; releasing ends it
+let activeTouches=new Map(),twoFinger=false;renderer.domElement.addEventListener('pointerdown',e=>{activeTouches.set(e.pointerId,{x:e.clientX,y:e.clientY,nowY:e.clientY});if(activeTouches.size>=2)twoFinger=true});renderer.domElement.addEventListener('pointermove',e=>{if(activeTouches.has(e.pointerId)){let p=activeTouches.get(e.pointerId);p.nowY=e.clientY;if(activeTouches.size>=2&&p.y-e.clientY>45)wheelieHold=true}});function endPointer(e){activeTouches.delete(e.pointerId);if(activeTouches.size<2){twoFinger=false;wheelieHold=false}}renderer.domElement.addEventListener('pointerup',endPointer);renderer.domElement.addEventListener('pointercancel',endPointer);
+// optional phone tilt steering
+let tiltEnabled=false;window.addEventListener('deviceorientation',e=>{if(e.gamma!=null){tiltEnabled=true;tilt=THREE.MathUtils.clamp(e.gamma/28,-1,1)}});
+let last=performance.now();function animate(now){requestAnimationFrame(animate);let dt=Math.min((now-last)/1000,.04);last=now;let throttle=gas?1:0;if(left&&right)throttle=1;let steerInput=(left&&right)?0:((tiltEnabled&&Math.abs(tilt)>.12)?tilt:(right?1:left?-1:0));steer=THREE.MathUtils.damp(steer,steerInput,4,dt);
+if(throttle)speed+=dt*(12+gear*2.2);else speed-=dt*2.2;if(brake)speed-=dt*27;speed=THREE.MathUtils.clamp(speed,0,220);
+if(!manual){if(speed>gear*maxSpeed[gear]*.78&&gear<6)gear++;if(speed<(gear-1)*maxSpeed[Math.max(1,gear-1)]*.55&&gear>1)gear--}
+rpm=1100+Math.round((speed/maxSpeed[gear])*6500)+(throttle?500:0);rpm=THREE.MathUtils.clamp(rpm,1000,8500);
+$('speed').textContent=Math.round(speed);$('gear').textContent=gear;$('rpm').textContent=rpm;
+// world moves toward rider for an endless straight road; bike stays centered with subtle lane sway
+const travel=speed*dt*.16;scene.position.z+=travel;
+for(const car of trafficCars){car.position.z+=travel*.9;if(car.position.z>12){car.position.z=-560-Math.random()*100;car.position.x=(Math.random()>.5?1:-1)*(4.5+Math.random()*.8);}}const pa=weatherGeo.attributes.position;for(let i=0;i<weatherCount;i++){let k=i*3;weatherPos[k+1]-=dt*(weather===4?2.2:weather===3?12:0);weatherPos[k+2]+=dt*(weather===3?24:weather===4?3:0);if(weatherPos[k+1]<0||weatherPos[k+2]>5){weatherPos[k]=(Math.random()-.5)*34;weatherPos[k+1]=12+Math.random()*8;weatherPos[k+2]=-75-Math.random()*20}}pa.needsUpdate=true;if(scene.position.z>14)scene.position.z=0;
+if(cameraThird){camera.position.x=THREE.MathUtils.damp(camera.position.x,-steer*.48,3.5,dt);camera.position.y=THREE.MathUtils.damp(camera.position.y,2.4,3,dt);camera.position.z=THREE.MathUtils.damp(camera.position.z,4.8,3,dt);camera.lookAt(steer*.4,1,-7);}
+else{camera.position.y=THREE.MathUtils.damp(camera.position.y,1.55,3,dt);camera.position.z=THREE.MathUtils.damp(camera.position.z,1.5,3,dt);camera.position.x=THREE.MathUtils.damp(camera.position.x,-steer*.48,3.5,dt);camera.rotation.order='YXZ';}camera.rotation.z=THREE.MathUtils.damp(camera.rotation.z,-steer*(brake?.11:.055),3,dt);camera.rotation.x=THREE.MathUtils.damp(camera.rotation.x,wheelieHold?-.085:0,4,dt);
+cockpit.rotation.z=THREE.MathUtils.damp(cockpit.rotation.z,-steer*.08,5,dt);bikePivot.rotation.z=THREE.MathUtils.damp(bikePivot.rotation.z,-steer*.12,4,dt);bikePivot.rotation.x=THREE.MathUtils.damp(bikePivot.rotation.x,wheelieHold?-.2:0,4,dt);
+// wheelie camera pitch, smooth but requires speed and two-finger gesture
+if(wheelieHold&&speed>12)camera.rotation.x=THREE.MathUtils.damp(camera.rotation.x,-.16,3,dt);
+renderer.render(scene,camera)}requestAnimationFrame(animate);
+$('start').addEventListener('click',async()=>{if(typeof DeviceOrientationEvent!=='undefined'&&DeviceOrientationEvent.requestPermission){try{await DeviceOrientationEvent.requestPermission()}catch(e){}}$('overlay').classList.add('hide');window.__rideStarted=true;});
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,1.65))});
+setWeather();
+</script></body></html>
