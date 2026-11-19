@@ -1,0 +1,112 @@
+name: Bursa Ride 3D APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'index.html'
+      - 'yehomaOBJ.obj'
+      - 'yehomaOBJ.mtl'
+      - '.github/workflows/build.yml'
+  release:
+    types: [published]
+permissions:
+  contents: write
+jobs:
+  build-apk:
+    name: Build Bursa Ride 3D APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Check game assets
+        run: |
+          test -f index.html
+          test -f yehomaOBJ.obj
+          test -f yehomaOBJ.mtl
+      - name: Build Android WebView project and bundle Three.js
+        shell: bash
+        run: |
+          mkdir -p app/src/main/assets/www app/src/main/java/com/bursaride/game
+          cp index.html yehomaOBJ.obj yehomaOBJ.mtl app/src/main/assets/www/
+          npm init -y
+          npm install --save-exact three@0.160.0 esbuild@0.24.0
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('app/src/main/assets/www/index.html')
+          html=p.read_text(encoding='utf-8')
+          found=list(re.finditer(r'<script\s+type=["\']module["\']\s*>(.*?)</script>',html,re.S|re.I))
+          if len(found)!=1: raise SystemExit(f'Expected one module script, got {len(found)}')
+          js=found[0].group(1)
+          Path('app/src/main/assets/www/game.js').write_text(js,encoding='utf-8')
+          html=html[:found[0].start()]+'<script type="module" src="./game.bundle.js"></script>'+html[found[0].end():]
+          p.write_text(html,encoding='utf-8')
+          PY
+          npx esbuild app/src/main/assets/www/game.js --bundle --format=esm --target=es2020 --outfile=app/src/main/assets/www/game.bundle.js
+          rm app/src/main/assets/www/game.js
+          cat > settings.gradle <<'GRADLE'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          rootProject.name = 'BursaRide3D'
+          include ':app'
+          GRADLE
+          cat > build.gradle <<'GRADLE'
+          plugins { id 'com.android.application' version '8.7.3' apply false }
+          GRADLE
+          cat > app/build.gradle <<'GRADLE'
+          plugins { id 'com.android.application' }
+          android {
+              namespace 'com.bursaride.game'
+              compileSdk 35
+              defaultConfig { applicationId 'com.bursaride.game'; minSdk 24; targetSdk 35; versionCode 2; versionName '2.0' }
+              buildTypes { release { minifyEnabled false } }
+              compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+          }
+          GRADLE
+          cat > app/src/main/AndroidManifest.xml <<'XML'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <application android:allowBackup="false" android:label="Bursa Ride 3D" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:hardwareAccelerated="true">
+              <activity android:name=".MainActivity" android:configChanges="orientation|screenSize|keyboardHidden" android:screenOrientation="landscape" android:exported="true">
+                <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+              </activity>
+            </application>
+          </manifest>
+          XML
+          cat > app/src/main/java/com/bursaride/game/MainActivity.java <<'JAVA'
+          package com.bursaride.game;
+          import android.app.Activity; import android.os.Bundle; import android.view.View; import android.webkit.WebChromeClient; import android.webkit.WebSettings; import android.webkit.WebView; import android.webkit.WebViewClient;
+          public class MainActivity extends Activity {
+            private WebView web;
+            @Override public void onCreate(Bundle b){ super.onCreate(b); getWindow().getDecorView().setSystemUiVisibility(5894|1024|512|4096); web=new WebView(this); web.setBackgroundColor(0xff050a12); web.setLayerType(View.LAYER_TYPE_HARDWARE,null); WebSettings s=web.getSettings(); s.setJavaScriptEnabled(true); s.setDomStorageEnabled(true); s.setAllowFileAccess(true); s.setMediaPlaybackRequiresUserGesture(false); web.setWebChromeClient(new WebChromeClient()); web.setWebViewClient(new WebViewClient()); setContentView(web); web.loadUrl("file:///android_asset/www/index.html"); }
+            @Override public void onBackPressed(){ if(web!=null&&web.canGoBack()) web.goBack(); else super.onBackPressed(); }
+            @Override protected void onDestroy(){ if(web!=null){web.destroy();web=null;} super.onDestroy(); }
+          }
+          JAVA
+          gradle wrapper --gradle-version 8.9 --distribution-type bin
+      - name: Build debug APK
+        run: ./gradlew --no-daemon assembleDebug
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk Bursa-Ride-3D.apk
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bursa-Ride-3D-APK
+          path: Bursa-Ride-3D.apk
+          retention-days: 30
+      - name: Attach APK to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Bursa-Ride-3D.apk
