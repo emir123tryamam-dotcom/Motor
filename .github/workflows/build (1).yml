@@ -1,0 +1,1637 @@
+name: Kaos Market APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths: [".github/workflows/build.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      GODOT_VERSION: "4.3"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Godot ve export şablonlarını indir
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          curl -fL --retry 3 -o godot.zip "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          curl -fL --retry 3 -o templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q godot.zip
+          sudo mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+          dir="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$dir"
+          unzip -q templates.tpz
+          mv templates/* "$dir/"
+
+      - name: Android SDK ve imza anahtarı
+        run: |
+          set -euo pipefail
+          set +o pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          set -o pipefail
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "build-tools;34.0.0" "platforms;android-34"
+          keytool -genkeypair -keystore "$HOME/debug.keystore" -storepass android -keypass android \
+            -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          mkdir -p "$HOME/.config/godot"
+          cat > "$HOME/.config/godot/editor_settings-4.3.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/debug_keystore = "$HOME/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOF
+
+      - name: Oyun projesini oluştur
+        run: |
+          set -euo pipefail
+          mkdir -p game
+          cat > game/project.godot <<'KAOS_EOF'
+          config_version=5
+
+          [application]
+          config/name="Kaos Market"
+          config/icon="res://icon.svg"
+          run/main_scene="res://main.tscn"
+          config/features=PackedStringArray("4.3", "GL Compatibility")
+
+          [display]
+          window/size/viewport_width=1280
+          window/size/viewport_height=720
+          window/stretch/mode="canvas_items"
+          window/stretch/aspect="expand"
+          window/handheld/orientation=4
+
+          [input_devices]
+          pointing/emulate_mouse_from_touch=false
+
+          [rendering]
+          renderer/rendering_method="gl_compatibility"
+          renderer/rendering_method.mobile="gl_compatibility"
+          textures/vram_compression/import_etc2_astc=true
+          limits/opengl/max_lights_per_object=16
+          KAOS_EOF
+          cat > game/main.tscn <<'KAOS_EOF'
+          [gd_scene load_steps=2 format=3]
+
+          [ext_resource type="Script" path="res://main.gd" id="1"]
+
+          [node name="Main" type="Node3D"]
+          script = ExtResource("1")
+          KAOS_EOF
+          cat > game/export_presets.cfg <<'KAOS_EOF'
+          [preset.0]
+          name="Android"
+          platform="Android"
+          runnable=true
+          export_filter="all_resources"
+          include_filter=""
+          exclude_filter=""
+          export_path=""
+
+          [preset.0.options]
+          gradle_build/use_gradle_build=false
+          architectures/armeabi-v7a=true
+          architectures/arm64-v8a=true
+          version/code=2
+          version/name="0.2"
+          package/unique_name="com.kaosmarket.nightshift"
+          package/name="Kaos Market"
+          package/signed=true
+          screen/immersive_mode=true
+          permissions/vibrate=true
+          KAOS_EOF
+          cat > game/icon.svg <<'KAOS_EOF'
+          <svg xmlns="http://www.w3.org/2000/svg" width="192" height="192"><rect width="192" height="192" rx="32" fill="#14101c"/><path d="M30 70h132l-12 90H42z" fill="#c8261c"/><path d="M60 70a36 40 0 0 1 72 0" fill="none" stroke="#eee" stroke-width="10"/><circle cx="72" cy="110" r="12" fill="#fff"/><circle cx="120" cy="110" r="12" fill="#fff"/></svg>
+          KAOS_EOF
+          cat > game/sfx.gd <<'KAOS_EOF'
+          extends Node
+
+          var cache = {}
+
+          func make(kind):
+              var file = {"beep": "cash", "thud": "stock", "scream": "scare", "drone": "ambient", "step": "step"}.get(kind, kind)
+              var path = "res://assets/audio/%s.ogg" % file
+              if ResourceLoader.exists(path):
+                  var stream = load(path)
+                  if kind == "drone":
+                      stream.loop = true
+                  return stream
+              var rate = 22050
+              var dur = {"beep": 0.12, "thud": 0.35, "scream": 1.1, "drone": 4.0, "step": 0.15, "ring": 1.0}[kind]
+              var n = int(rate * dur)
+              var data = PackedByteArray()
+              data.resize(n * 2)
+              for i in n:
+                  var t = float(i) / rate
+                  var k = 1.0 - float(i) / n
+                  var v = 0.0
+                  if kind == "beep":
+                      v = sin(TAU * 880.0 * t) * 0.4
+                  elif kind == "step":
+                      v = (sin(TAU * 90.0 * t) + randf_range(-0.6, 0.6)) * k * k * k
+                  elif kind == "ring":
+                      v = sin(TAU * 950.0 * t) * 0.35 * (1.0 if int(t * 20.0) % 2 == 0 else 0.0)
+                  elif kind == "thud":
+                      v = (sin(TAU * 60.0 * t) + randf_range(-0.5, 0.5)) * k * k * 0.7
+                  elif kind == "scream":
+                      v = (sin(TAU * (700.0 + 500.0 * sin(t * 23.0)) * t) * 0.6 + randf_range(-0.4, 0.4)) * k
+                  else:
+                      v = sin(TAU * 55.0 * t) * 0.18 + sin(TAU * 82.5 * t) * 0.08 + sin(TAU * 110.25 * t) * 0.04
+                  data.encode_s16(i * 2, int(clamp(v, -1.0, 1.0) * 32000.0))
+              var s = AudioStreamWAV.new()
+              s.format = AudioStreamWAV.FORMAT_16_BITS
+              s.mix_rate = rate
+              s.data = data
+              if kind == "drone":
+                  s.loop_mode = AudioStreamWAV.LOOP_FORWARD
+                  s.loop_end = n
+              return s
+
+          func play(kind, db = 0.0):
+              if not cache.has(kind):
+                  cache[kind] = make(kind)
+              var p = AudioStreamPlayer.new()
+              p.stream = cache[kind]
+              p.volume_db = db
+              add_child(p)
+              p.play()
+              if kind != "drone":
+                  p.finished.connect(p.queue_free)
+              return p
+
+          func play_at(kind, pos):
+              if not cache.has(kind):
+                  cache[kind] = make(kind)
+              var p = AudioStreamPlayer3D.new()
+              p.stream = cache[kind]
+              p.unit_size = 4.0
+              p.max_distance = 30.0
+              add_child(p)
+              p.global_position = pos
+              p.play()
+              p.finished.connect(p.queue_free)
+          KAOS_EOF
+          cat > game/actor.gd <<'KAOS_EOF'
+          extends Node3D
+
+          var path = []
+          var speed = 2.0
+          var state = "shop"
+          var unit = 0
+          var wants = []
+          var total = 0
+          var anim = null
+          var wait = 0.0
+          var legs = []
+          var phase = 0.0
+
+          func walk(delta, mult = 1.0):
+              if path.is_empty():
+                  return true
+              var target = path[0]
+              var d = target - position
+              d.y = 0.0
+              var step = speed * mult * delta
+              if d.length() <= step:
+                  position = Vector3(target.x, 0.0, target.z)
+                  path.remove_at(0)
+              else:
+                  position += d.normalized() * step
+                  rotation.y = atan2(d.x, d.z)
+              phase += step * 4.0
+              for i in legs.size():
+                  legs[i].rotation.x = sin(phase + i * PI) * 0.6
+              return path.is_empty()
+          KAOS_EOF
+          cat > game/player.gd <<'KAOS_EOF'
+          extends CharacterBody3D
+
+          var cam
+          var light
+          var move = Vector2.ZERO
+          var running = false
+          var stamina = 100.0
+          var sens = 1.0
+          var hidden = false
+
+          func _ready():
+              collision_layer = 2
+              collision_mask = 1
+              var shape = CollisionShape3D.new()
+              var cap = CapsuleShape3D.new()
+              cap.radius = 0.3
+              cap.height = 1.7
+              shape.shape = cap
+              shape.position.y = 0.85
+              add_child(shape)
+              cam = Camera3D.new()
+              cam.position.y = 1.6
+              cam.fov = 75.0
+              add_child(cam)
+              light = SpotLight3D.new()
+              light.spot_range = 16.0
+              light.spot_angle = 28.0
+              light.light_energy = 3.0
+              light.visible = false
+              cam.add_child(light)
+
+          func look(rel):
+              rotation.y -= rel.x * 0.005 * sens
+              cam.rotation.x = clamp(cam.rotation.x - rel.y * 0.005 * sens, -1.3, 1.3)
+
+          func _physics_process(delta):
+              if hidden:
+                  return
+              var sprint = running and stamina > 1.0 and move.length() > 0.1
+              stamina = clamp(stamina + (-22.0 if sprint else 12.0) * delta, 0.0, 100.0)
+              var speed = 5.2 if sprint else 3.0
+              var dir = transform.basis * Vector3(move.x, 0.0, move.y)
+              velocity.x = dir.x * speed
+              velocity.z = dir.z * speed
+              velocity.y = 0.0 if is_on_floor() else velocity.y - 9.8 * delta
+              move_and_slide()
+          KAOS_EOF
+          cat > game/hud.gd <<'KAOS_EOF'
+          extends Control
+
+          var game
+          var joy_id = -1
+          var joy_origin = Vector2.ZERO
+          var joy_pos = Vector2.ZERO
+          var look_id = -1
+          var run_id = -1
+
+          func _ready():
+              set_anchors_preset(Control.PRESET_FULL_RECT)
+              mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+          func buttons():
+              var s = get_viewport_rect().size
+              return {
+                  "use": [Vector2(s.x - 140, s.y - 180), 75.0, "AL/KOY"],
+                  "drop": [Vector2(s.x - 300, s.y - 110), 55.0, "BIRAK"],
+                  "run": [Vector2(s.x - 110, s.y - 360), 55.0, "KOŞ"],
+                  "light": [Vector2(s.x - 280, s.y - 270), 55.0, "FENER"],
+                  "menu": [Vector2(s.x - 80, 70), 45.0, "MENÜ"]}
+
+          func item_rect(i, count):
+              var s = get_viewport_rect().size
+              var cols = 2 if count > 4 else 1
+              var rows = int(ceil(count / float(cols)))
+              var x = s.x * 0.5 - cols * 270 + (i % cols) * 540 + 10
+              return Rect2(x, s.y - 30 - rows * 76 + int(i / cols) * 76, 520, 64)
+
+          func release():
+              joy_id = -1
+              look_id = -1
+              run_id = -1
+              game.player.move = Vector2.ZERO
+              game.player.running = false
+
+          func _input(event):
+              if event is InputEventScreenTouch:
+                  var p = event.position
+                  if not event.pressed:
+                      if event.index == joy_id:
+                          joy_id = -1
+                          game.player.move = Vector2.ZERO
+                      if event.index == look_id:
+                          look_id = -1
+                      if event.index == run_id:
+                          run_id = -1
+                          game.player.running = false
+                      return
+                  if game.scare > 0.0:
+                      return
+                  if game.screen != "play":
+                      var items = game.panel().items
+                      for i in items.size():
+                          if item_rect(i, items.size()).has_point(p):
+                              release()
+                              game.menu_action(items[i][0])
+                              return
+                      return
+                  var b = buttons()
+                  for key in b:
+                      if p.distance_to(b[key][0]) <= b[key][1]:
+                          if key == "run":
+                              run_id = event.index
+                              game.player.running = true
+                          elif key == "menu":
+                              release()
+                              game.screen = "pause"
+                          else:
+                              game.button(key)
+                          return
+                  if p.x < get_viewport_rect().size.x * 0.4:
+                      joy_id = event.index
+                      joy_origin = p
+                      joy_pos = p
+                  else:
+                      look_id = event.index
+              elif event is InputEventScreenDrag and game.screen == "play":
+                  if event.index == joy_id:
+                      joy_pos = event.position
+                      game.player.move = ((joy_pos - joy_origin) / 90.0).limit_length(1.0)
+                  elif event.index == look_id:
+                      game.player.look(event.relative)
+
+          func _process(_delta):
+              queue_redraw()
+
+          func text(pos, value, px = 26, col = Color.WHITE):
+              draw_string(ThemeDB.fallback_font, pos, value, HORIZONTAL_ALIGNMENT_LEFT, -1, px, col)
+
+          func center(y, value, px = 30, col = Color.WHITE):
+              var w = get_viewport_rect().size.x
+              draw_string(ThemeDB.fallback_font, Vector2(0, y), value, HORIZONTAL_ALIGNMENT_CENTER, w, px, col)
+
+          func _draw():
+              var s = get_viewport_rect().size
+              if game.scare > 0.0:
+                  draw_rect(Rect2(Vector2.ZERO, s), Color(0.08, 0, 0))
+                  var c = s * 0.5 + Vector2(randf_range(-20, 20), randf_range(-20, 20))
+                  draw_circle(c, s.y * 0.42, Color(0.75, 0.72, 0.65))
+                  draw_circle(c + Vector2(-110, -70), 60, Color.BLACK)
+                  draw_circle(c + Vector2(110, -70), 60, Color.BLACK)
+                  draw_circle(c + Vector2(-110, -70), 10, Color.RED)
+                  draw_circle(c + Vector2(110, -70), 10, Color.RED)
+                  draw_circle(c + Vector2(0, 130), 90, Color.BLACK)
+                  return
+              if game.screen != "play":
+                  var p = game.panel()
+                  var solid_bg = game.screen in ["title", "over"]
+                  draw_rect(Rect2(Vector2.ZERO, s), Color(0.05, 0.0, 0.02, 1.0 if solid_bg else 0.82))
+                  if game.screen == "cams":
+                      draw_texture_rect(game.feed.get_texture(), Rect2(s.x * 0.5 - 360, 90, 720, 405), false)
+                  center(62, p.title, 44, Color(1, 0.3, 0.25))
+                  var y = 125
+                  for line in p.lines:
+                      draw_multiline_string(ThemeDB.fallback_font, Vector2(s.x * 0.5 - 450, y), line, HORIZONTAL_ALIGNMENT_CENTER, 900, 26)
+                      y += 70 if line.length() > 70 else 38
+                  for i in p.items.size():
+                      var r = item_rect(i, p.items.size())
+                      draw_rect(r, Color(0.22, 0.2, 0.3))
+                      draw_string(ThemeDB.fallback_font, r.position + Vector2(0, 42), p.items[i][1], HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 26)
+                  return
+              text(Vector2(30, 40), "Gün %d   %s %s   Para: %d TL" % [game.day, game.time_text(), "GECE" if game.night else "AKŞAM", game.money])
+              text(Vector2(30, 76), game.objective(), 22, Color(1, 0.85, 0.4))
+              text(Vector2(30, 108), "Elde: %s   Nefes: %d   Pil: %d" % [game.held_name(), int(game.player.stamina), int(game.battery)], 20)
+              text(Vector2(30, 138), game.task_text(), 20, Color(0.7, 0.85, 1))
+              center(s.y * 0.5 + 8, "+", 28)
+              center(s.y * 0.5 + 50, game.hint(), 24)
+              center(180, game.message if game.message_time > 0.0 else "", 28, Color(0.6, 1, 0.7))
+              var b = buttons()
+              for key in b:
+                  draw_circle(b[key][0], b[key][1], Color(1, 1, 1, 0.18))
+                  draw_string(ThemeDB.fallback_font, b[key][0] + Vector2(-b[key][1], 8), b[key][2], HORIZONTAL_ALIGNMENT_CENTER, b[key][1] * 2, 22)
+              if joy_id >= 0:
+                  draw_circle(joy_origin, 90, Color(1, 1, 1, 0.12))
+                  draw_circle(joy_origin + (joy_pos - joy_origin).limit_length(90.0), 40, Color(1, 1, 1, 0.35))
+          KAOS_EOF
+          cat > game/main.gd <<'KAOS_EOF'
+          extends Node3D
+
+          const Player = preload("res://player.gd")
+          const Hud = preload("res://hud.gd")
+          const Actor = preload("res://actor.gd")
+          const Sfx = preload("res://sfx.gd")
+          const NAMES = ["Konserve", "Cips", "İçecek", "Temizlik"]
+          const COST = [40, 50, 60, 80]
+          const PRICE = [12, 15, 18, 25]
+          const COLORS = [Color(0.8, 0.15, 0.1), Color(0.95, 0.75, 0.1), Color(0.1, 0.5, 0.9), Color(0.2, 0.75, 0.35)]
+          const CELL = 0.5
+          const ORIGIN = Vector2(-10.0, -8.0)
+          const DAY_LEN = 180.0
+          const NIGHT_LEN = 120.0
+
+          var player
+          var hud
+          var sfx
+          var env
+          var grid = AStarGrid2D.new()
+          var units = []
+          var boxes = []
+          var fuses = []
+          var lamps = []
+          var customers = []
+          var ragdoll = []
+          var creature = null
+          var held = -1
+          var money = 150
+          var day = 1
+          var night = false
+          var clock = DAY_LEN
+          var unlocked = [true, true, true, false]
+          var strong_light = false
+          var spawn_in = 6.0
+          var scare = 0.0
+          var event_done = false
+          var message = ""
+          var message_time = 0.0
+          var sold = 0
+          var smoke = false
+          var shot = false
+          var screen = "title"
+          var page = 0
+          var tut = 0
+          var battery = 100.0
+          var bad = false
+          var shown = [-1, false]
+          var view
+          var volume = 1.0
+          var sens = 1.0
+          var quality = 0
+          var earned = 0
+          var jobs = {"mop": 0, "trash": 0, "skt": 0}
+          var dirt = []
+          var notes = {}
+          var note_text = ""
+          var awards = []
+          var feed
+          var feed_cam
+          var cam_index = 0
+          var door
+          var event_in = 20.0
+          var step_in = 0.0
+          var guest = null
+          var guest_done = false
+          var ring_left = 0.0
+          var kind = 0
+          const KINDS = ["Takipçi", "Dinleyici", "Gölge"]
+          const NOTES = ["Not 1: 'Saat üçte gelen müşteriye sakın satış yapma.'", "Not 2: 'Eski kasiyer sigortaları kendisi kapatıyordu.'", "Not 3: 'Market, kayıp vardiyaları geri istiyor.'"]
+          const TUTORIAL = ["Sol tarafa basıp sürükle: yürü. Sağ tarafı sürükle: etrafa bak.", "Ortadaki + işaretini nesneye getir, AL/KOY tuşuna bas. Alçak nesneler için aşağı bak.", "Depodaki koliyi aç, ürünü al, aynı adlı reyona koy. Müşteri bekleyince kasaya bas.", "00:00'da elektrik gider. 3 sigortayı aç, dolaba saklan, 06:00'ya kadar dayan."]
+
+          func _ready():
+              smoke = "--smoke" in OS.get_cmdline_user_args()
+              shot = "--shot" in OS.get_cmdline_user_args()
+              load_game()
+              sfx = Sfx.new()
+              add_child(sfx)
+              build_world()
+              load_stock()
+              player = Player.new()
+              player.position = Vector3(-6.0, 0.05, 2.5)
+              player.rotation.y = PI
+              add_child(player)
+              apply_light()
+              var layer = CanvasLayer.new()
+              add_child(layer)
+              hud = Hud.new()
+              hud.game = self
+              layer.add_child(hud)
+              sfx.play("drone", -8.0)
+              build_extras()
+              apply_settings()
+              if smoke:
+                  screen = "play"
+                  run_smoke.call_deferred()
+              elif shot:
+                  run_shot.call_deferred()
+
+          func material(color, noisy = false, glow = false):
+              var m = StandardMaterial3D.new()
+              m.albedo_color = color
+              m.roughness = 0.8
+              if noisy:
+                  var img = Image.create(64, 64, false, Image.FORMAT_RGB8)
+                  for x in 64:
+                      for y in 64:
+                          var v = randf_range(0.82, 1.0)
+                          if x < 2 or y < 2:
+                              v = 0.55
+                          img.set_pixel(x, y, Color(v, v, v))
+                  m.albedo_texture = ImageTexture.create_from_image(img)
+                  m.uv1_triplanar = true
+              if glow:
+                  m.emission_enabled = true
+                  m.emission = color
+              return m
+
+          func mesh(parent, shape, pos, mat):
+              var m = MeshInstance3D.new()
+              m.mesh = shape
+              m.material_override = mat
+              m.position = pos
+              parent.add_child(m)
+              return m
+
+          func box_mesh(parent, size, pos, mat):
+              var b = BoxMesh.new()
+              b.size = size
+              return mesh(parent, b, pos, mat)
+
+          func solid(size, pos, mat, act = null, block = true):
+              var body = StaticBody3D.new()
+              body.position = pos
+              add_child(body)
+              var c = CollisionShape3D.new()
+              var s = BoxShape3D.new()
+              s.size = size
+              c.shape = s
+              body.add_child(c)
+              if mat != null:
+                  box_mesh(body, size, Vector3.ZERO, mat)
+              if act != null:
+                  body.set_meta("act", act)
+              if block:
+                  for x in grid.region.size.x:
+                      for y in grid.region.size.y:
+                          var w = ORIGIN + Vector2(x + 0.5, y + 0.5) * CELL
+                          if abs(w.x - pos.x) < size.x * 0.5 + 0.25 and abs(w.y - pos.z) < size.z * 0.5 + 0.25:
+                              grid.set_point_solid(Vector2i(x, y), true)
+              return body
+
+          func build_world():
+              grid.region = Rect2i(0, 0, 52, 32)
+              grid.cell_size = Vector2(CELL, CELL)
+              grid.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
+              grid.update()
+              var we = WorldEnvironment.new()
+              env = Environment.new()
+              env.background_mode = Environment.BG_COLOR
+              env.background_color = Color(0.01, 0.01, 0.02)
+              env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+              we.environment = env
+              add_child(we)
+              var floor_mat = material(Color(0.55, 0.55, 0.58), true)
+              var wall_mat = material(Color(0.6, 0.56, 0.48), true)
+              for x in range(-8, 16, 4):
+                  for z in range(-6, 8, 4):
+                      solid(Vector3(4, 0.2, 4), Vector3(x, -0.1, z), floor_mat, null, false)
+              box_mesh(self, Vector3(26, 0.2, 16), Vector3(3, 3.4, 0), material(Color(0.25, 0.25, 0.27)))
+              solid(Vector3(26, 3.4, 0.3), Vector3(3, 1.7, -8), wall_mat)
+              solid(Vector3(26, 3.4, 0.3), Vector3(3, 1.7, 8), wall_mat)
+              solid(Vector3(0.3, 3.4, 16), Vector3(-10, 1.7, 0), wall_mat)
+              solid(Vector3(0.3, 3.4, 16), Vector3(16, 1.7, 0), wall_mat)
+              solid(Vector3(0.3, 3.4, 6.5), Vector3(9, 1.7, -4.75), wall_mat)
+              solid(Vector3(0.3, 3.4, 6.5), Vector3(9, 1.7, 4.75), wall_mat)
+              box_mesh(self, Vector3(2.0, 2.6, 0.1), Vector3(0, 1.3, 7.82), material(Color(0.1, 0.25, 0.3)))
+              for x in [-5, 2, 12]:
+                  for z in [-4, 4]:
+                      var l = OmniLight3D.new()
+                      l.position = Vector3(x, 3.0, z)
+                      l.omni_range = 9.0
+                      l.light_energy = 1.1
+                      add_child(l)
+                      lamps.append(l)
+                      box_mesh(self, Vector3(1.4, 0.05, 0.3), Vector3(x, 3.28, z), material(Color(0.9, 0.95, 1.0), false, true))
+              add_unit(0, Vector3(-3.5, 0, -1.5), Vector3(0.8, 1.8, 4.0), Vector3(-2.4, 0, -1.5), false)
+              add_unit(1, Vector3(0.5, 0, -1.5), Vector3(0.8, 1.8, 4.0), Vector3(1.6, 0, -1.5), false)
+              add_unit(2, Vector3(0.0, 0, -7.3), Vector3(4.0, 2.4, 0.9), Vector3(0.0, 0, -6.2), true)
+              add_unit(3, Vector3(4.5, 0, -1.5), Vector3(0.8, 1.8, 4.0), Vector3(5.6, 0, -1.5), false)
+              solid(Vector3(2.6, 1.0, 0.9), Vector3(-6, 0.5, 4.2), material(Color(0.35, 0.2, 0.1), true), {"t": "till"})
+              box_mesh(self, Vector3(0.5, 0.35, 0.3), Vector3(-6.7, 1.18, 4.2), material(Color(0.08, 0.08, 0.1)))
+              box_mesh(self, Vector3(0.4, 0.2, 0.02), Vector3(-6.7, 1.25, 4.04), material(Color(0.2, 0.9, 0.4), false, true))
+              for i in NAMES.size():
+                  var pos = Vector3(14.5, 0.4, -4.5 + i * 3.0)
+                  var body = solid(Vector3(0.9, 0.8, 0.9), pos, material(Color(0.55, 0.4, 0.22), true), {"t": "box", "i": i})
+                  var tape = box_mesh(body, Vector3(0.92, 0.06, 0.25), Vector3(0, 0.4, 0), material(COLORS[i]))
+                  var label = Label3D.new()
+                  label.text = NAMES[i]
+                  label.position = Vector3(0, 0.9, 0)
+                  label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+                  body.add_child(label)
+                  boxes.append({"open": false, "left": 6 if i < 3 else 0, "tape": tape, "label": label})
+                  refresh_box(i)
+              var spots = [Vector3(-9.7, 1.4, -5), Vector3(7.5, 1.4, 7.7), Vector3(15.7, 1.4, 6)]
+              for i in 3:
+                  var body = solid(Vector3(0.5, 0.7, 0.5), spots[i], material(Color(0.3, 0.3, 0.32)), {"t": "fuse", "i": i}, false)
+                  var lamp = box_mesh(body, Vector3(0.54, 0.12, 0.54), Vector3(0, 0.2, 0), material(Color.GREEN, false, true))
+                  fuses.append({"on": true, "lamp": lamp, "pos": spots[i]})
+              set_lights(true)
+
+          func add_unit(i, pos, size, stand, fridge):
+              var body_color = Color(0.75, 0.8, 0.85) if fridge else Color(0.3, 0.32, 0.36)
+              solid(size, pos + Vector3(0, size.y * 0.5, 0), null, {"t": "unit", "i": i})
+              var mat = material(body_color)
+              var slots = []
+              if fridge:
+                  box_mesh(self, Vector3(size.x, size.y, 0.1), pos + Vector3(0, size.y * 0.5, -0.4), mat)
+                  for y in [0.05, 0.9, 1.65, 2.4]:
+                      box_mesh(self, Vector3(size.x, 0.06, 0.8), pos + Vector3(0, y, 0), mat)
+                  for k in 8:
+                      slots.append(pos + Vector3(-1.5 + (k % 4), 1.1 if k < 4 else 0.28, 0.2))
+                  var glow = OmniLight3D.new()
+                  glow.position = pos + Vector3(0, 1.8, 0.7)
+                  glow.omni_range = 2.5
+                  glow.light_color = Color(0.6, 0.8, 1.0)
+                  add_child(glow)
+              else:
+                  for z in [-2.0, 2.0]:
+                      box_mesh(self, Vector3(0.8, 1.8, 0.08), pos + Vector3(0, 0.9, z), mat)
+                  for y in [0.15, 0.85, 1.55]:
+                      box_mesh(self, Vector3(0.8, 0.06, 4.0), pos + Vector3(0, y, 0), mat)
+                  for k in 8:
+                      slots.append(pos + Vector3(0.18, 1.08 if k < 4 else 0.38, -1.5 + (k % 4)))
+              var label = Label3D.new()
+              label.text = NAMES[i]
+              label.font_size = 64
+              label.position = pos + Vector3(0, size.y + 0.3, 0.5 if fridge else 0.0)
+              label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+              add_child(label)
+              var items = []
+              for p in slots:
+                  var m = product(i)
+                  m.position = p
+                  add_child(m)
+                  items.append(m)
+              units.append({"bad": false, "count": 3 if i < 3 else 0, "items": items, "stand": stand})
+              refresh_unit(i)
+
+          func product(i):
+              var root = Node3D.new()
+              if i == 100:
+                  var bag = SphereMesh.new()
+                  bag.radius = 0.2
+                  bag.height = 0.34
+                  mesh(root, bag, Vector3.ZERO, material(Color(0.04, 0.04, 0.05)))
+                  return root
+              if i == 0 or i == 2:
+                  var c = CylinderMesh.new()
+                  c.top_radius = 0.13 if i == 0 else 0.07
+                  c.bottom_radius = 0.13
+                  c.height = 0.32 if i == 0 else 0.45
+                  c.radial_segments = 10
+                  mesh(root, c, Vector3.ZERO, material(COLORS[i]))
+              else:
+                  box_mesh(root, Vector3(0.28, 0.4, 0.2), Vector3.ZERO, material(COLORS[i]))
+              box_mesh(root, Vector3(0.2, 0.08, 0.27), Vector3.ZERO, material(Color(0.95, 0.95, 0.9)))
+              return root
+
+          func refresh_unit(i):
+              for k in units[i].items.size():
+                  units[i].items[k].visible = k < units[i].count
+
+          func refresh_box(i):
+              var b = boxes[i]
+              b.tape.visible = not b.open
+              b.label.text = "%s (%s)" % [NAMES[i], ("%d adet" % b.left) if b.open else "kapalı"]
+
+          func set_lights(on):
+              for l in lamps:
+                  l.visible = on
+              env.ambient_light_color = Color(0.45, 0.45, 0.5) if on else Color(0.05, 0.05, 0.09)
+              env.fog_enabled = not on
+              env.fog_light_color = Color(0.02, 0.02, 0.04)
+              env.fog_density = 0.06
+
+          func apply_light():
+              player.light.light_energy = 6.0 if strong_light else 3.0
+              player.light.spot_range = 24.0 if strong_light else 14.0
+
+          func say(value):
+              message = value
+              message_time = 4.0
+
+          func aimed():
+              var from = player.cam.global_position
+              var to = from - player.cam.global_transform.basis.z * 2.8
+              var q = PhysicsRayQueryParameters3D.create(from, to, 1 | 8, [player.get_rid()])
+              var hit = get_world_3d().direct_space_state.intersect_ray(q)
+              if hit and hit.collider.has_meta("act"):
+                  return hit.collider
+              return null
+
+          func hint():
+              if player.hidden:
+                  return "Çıkmak için AL/KOY"
+              var body = aimed()
+              if body == null:
+                  return ""
+              var a = body.get_meta("act")
+              if a.t == "box":
+                  return "Koliyi aç" if not boxes[a.i].open else "Ürün al: " + NAMES[a.i]
+              if a.t == "unit":
+                  return "%s reyonu %d/8%s" % [NAMES[a.i], units[a.i].count, "  SKT GEÇMİŞ VAR" if units[a.i].bad else ""]
+              if a.t == "till":
+                  return "Müşteriye satış yap"
+              if a.t == "fuse":
+                  return "Sigorta"
+              return {"mop": "Yeri sil", "trash": "Çöpü al", "bin": "Çöpe at", "hide": "Saklan", "cams": "Kameralara bak", "phone": "Telefonu aç", "note": "Notu oku"}.get(a.t, "Yerden al")
+
+          func button(key):
+              if scare > 0.0:
+                  return
+              if player.hidden:
+                  if key == "use":
+                      unhide()
+                  return
+              if key == "light" and battery <= 0.0:
+                  say("Pil bitti")
+              elif key == "light":
+                  player.light.visible = not player.light.visible
+                  sfx.play("beep", -12.0)
+              elif key == "drop":
+                  drop()
+              elif key == "use":
+                  var body = aimed()
+                  if body != null:
+                      use(body.get_meta("act"), body)
+
+          func use(a, body = null):
+              if a.t == "box":
+                  var b = boxes[a.i]
+                  if not b.open:
+                      b.open = true
+                      sfx.play("thud")
+                      if tut == 0:
+                          tut = 1
+                  elif held == -1 and b.left > 0:
+                      b.left -= 1
+                      held = a.i
+                  elif held == a.i and not bad:
+                      b.left += 1
+                      held = -1
+                  refresh_box(a.i)
+              elif a.t == "unit":
+                  var u = units[a.i]
+                  if not unlocked[a.i]:
+                      say("Bu reyon kilitli, menüden aç")
+                  elif held == a.i and not bad and u.count < 8:
+                      u.count += 1
+                      held = -1
+                      sfx.play("thud", -6.0)
+                      var item = u.items[u.count - 1]
+                      item.scale = Vector3.ONE * 0.2
+                      create_tween().tween_property(item, "scale", Vector3.ONE, 0.25)
+                      if tut == 1:
+                          tut = 2
+                  elif held == -1 and u.count > 0:
+                      u.count -= 1
+                      held = a.i
+                      bad = u.bad
+                      u.bad = false
+                  elif held != -1:
+                      say("Yanlış reyon, reyon dolu veya ürün bozuk")
+                  refresh_unit(a.i)
+              elif a.t == "till":
+                  if guest != null:
+                      say("Kuralı çiğnedin...")
+                      caught()
+                  else:
+                      serve()
+              elif a.t == "fuse":
+                  if night and not fuses[a.i].on:
+                      set_fuse(a.i, true)
+                      sfx.play("beep")
+                      if fuses.all(func(f): return f.on):
+                          set_lights(true)
+                          say("Elektrik geldi. 06:00'ya kadar dayan")
+              elif a.t == "item" and held == -1 and body != null:
+                  held = a.i
+                  bad = a.get("bad", false)
+                  body.queue_free()
+              elif a.t == "mop" and body != null:
+                  dirt.erase(body)
+                  body.queue_free()
+                  job("mop")
+              elif a.t == "trash" and held == -1 and body != null:
+                  held = 100
+                  dirt.erase(body)
+                  body.queue_free()
+              elif a.t == "bin":
+                  if held == 100:
+                      held = -1
+                      job("trash")
+                  elif held >= 0 and bad:
+                      held = -1
+                      bad = false
+                      job("skt")
+                  else:
+                      say("Buraya yalnızca çöp ve tarihi geçmiş ürün atılır")
+              elif a.t == "hide":
+                  player.hidden = true
+                  player.move = Vector2.ZERO
+                  player.light.visible = false
+                  player.set_meta("back", player.position)
+                  player.position = a.p
+                  player.rotation.y = a.r
+                  player.cam.rotation.x = 0.0
+                  player.cam.position.y = a.h
+              elif a.t == "cams":
+                  screen = "cams"
+                  show_cam()
+              elif a.t == "phone":
+                  if ring_left > 0.0:
+                      ring_left = 0.0
+                      note_text = "Telefondaki ses: 'Üçte kapıya bakma. Kasaya dokunma.'"
+                      screen = "note"
+              elif a.t == "note" and body != null:
+                  notes[a.i] = true
+                  note_text = NOTES[a.i]
+                  screen = "note"
+                  if notes.size() == 3:
+                      award("Arşivci")
+                  save_game()
+
+          func unhide():
+              player.hidden = false
+              player.cam.position.y = 1.6
+              player.position = player.get_meta("back")
+
+          func job(key):
+              jobs[key] += 1
+              sfx.play("beep")
+              if jobs[key] == (1 if key == "skt" else 3):
+                  money += 30
+                  earned += 30
+                  say("Görev tamam! +30 TL")
+
+          func task_text():
+              return "Yer silme %d/3  Çöp %d/3  SKT kontrolü %d/1" % [min(jobs.mop, 3), min(jobs.trash, 3), min(jobs.skt, 1)]
+
+          func award(label):
+              if not label in awards:
+                  awards.append(label)
+                  say("Başarım: " + label)
+
+          func drop():
+              if held == -1:
+                  return
+              var r = RigidBody3D.new()
+              r.collision_layer = 8
+              r.collision_mask = 1
+              var c = CollisionShape3D.new()
+              var s = BoxShape3D.new()
+              s.size = Vector3(0.28, 0.4, 0.28)
+              c.shape = s
+              r.add_child(c)
+              r.add_child(product(held))
+              r.set_meta("act", {"t": "item", "i": held, "bad": bad})
+              add_child(r)
+              var forward = -player.cam.global_transform.basis.z
+              r.global_position = player.cam.global_position + forward * 0.5
+              r.linear_velocity = forward * 2.0
+              held = -1
+              bad = false
+
+          func held_name():
+              if held == -1:
+                  return "-"
+              if held == 100:
+                  return "Çöp torbası"
+              return NAMES[held] + (" (TARİHİ GEÇMİŞ)" if bad else "")
+
+          func time_text():
+              var length = NIGHT_LEN if night else DAY_LEN
+              var minutes = int((1.0 - clamp(clock / length, 0.0, 1.0)) * 360.0)
+              var hour = (0 if night else 18) + minutes / 60
+              return "%02d:%02d" % [hour % 24, minutes % 60]
+
+          func objective():
+              if not night and tut < 3:
+                  return ["Eğitim: depoya git, bir koliyi aç", "Eğitim: koliden ürün al, aynı adlı reyona koy", "Eğitim: müşteri kasada bekleyince kasaya bas"][tut]
+              if night:
+                  var left = fuses.filter(func(f): return not f.on).size()
+                  var tip = ["feneri tut, yavaşlar", "koşma, kıpırdamazsan seni duymaz", "feneri tut, donar"][kind]
+                  return "%s: %s. Kapalı sigorta: %d" % [KINDS[kind], tip, left]
+              return "5 satış yap (%d/5). Kasada bekleyen: %d" % [min(sold, 5), customers.filter(func(c): return c.state == "pay").size()]
+
+          func panel():
+              var back = [["resume", "Devam"]]
+              if screen == "title":
+                  return {"title": "KAOS MARKET: NIGHT SHIFT", "lines": ["Gün %d   Para %d TL" % [day, money], "Başarımlar: " + (", ".join(awards) if awards.size() > 0 else "-"), "Bulunan not: %d/3" % notes.size()], "items": [["start", "Oyna"], ["help", "Nasıl oynanır"], ["settings", "Ayarlar"], ["reset", "Kaydı sil"], ["quit", "Çıkış"]]}
+              if screen == "tutorial":
+                  return {"title": "NASIL OYNANIR %d/4" % (page + 1), "lines": [TUTORIAL[page]], "items": [["next", "İleri"], ["resume", "Atla"]]}
+              if screen == "settings":
+                  return {"title": "AYARLAR", "lines": [], "items": [["vol", "Ses: %d%%" % int(volume * 100)], ["sens", "Kamera hassasiyeti: %.1f" % sens], ["gfx", "Grafik: " + ["Yüksek", "Orta", "Düşük"][quality]], ["title", "Geri"]]}
+              if screen == "over":
+                  return {"title": "GAME OVER", "lines": ["Yakalandın. 60 TL kaybettin."], "items": [["resume", "Günü tekrar dene"], ["title", "Ana menü"]]}
+              if screen == "summary":
+                  return {"title": "06:00 - VARDİYA BİTTİ", "lines": ["Bu vardiyanın kazancı: %d TL" % earned, "Kasa: %d TL" % money, "Sıradaki gece daha zor." if day != 6 else ("GERÇEK SON: Notları çözdün ve marketi mühürledin." if notes.size() == 3 else "SON: Hayatta kaldın ama market hâlâ aç. Notları bul.")], "items": back}
+              if screen == "note":
+                  return {"title": "...", "lines": [note_text], "items": back}
+              if screen == "cams":
+                  return {"title": "KAMERA %d/3" % (cam_index + 1), "lines": [], "items": [["cam", "Sonraki kamera"], ["resume", "Kapat"]]}
+              var list = [["resume", "Devam"]]
+              if not night:
+                  for i in NAMES.size():
+                      if unlocked[i]:
+                          list.append(["buy%d" % i, "%s kolisi (%d TL)" % [NAMES[i], COST[i]]])
+                  if not unlocked[3]:
+                      list.append(["unlock", "Temizlik reyonu (300 TL)"])
+                  if not strong_light:
+                      list.append(["light_up", "Güçlü fener (200 TL)"])
+                  list.append(["battery", "Pil (30 TL)"])
+                  list.append(["close", "Dükkanı kapat"])
+              list.append(["title", "Ana menü"])
+              return {"title": "MENÜ", "lines": [], "items": list}
+
+          func menu_action(id):
+              if id == "resume":
+                  screen = "play"
+              elif id == "start":
+                  screen = "play"
+                  if tut == 0:
+                      page = 0
+                      screen = "tutorial"
+              elif id == "help":
+                  page = 0
+                  screen = "tutorial"
+              elif id == "next":
+                  page += 1
+                  if page >= TUTORIAL.size():
+                      page = 0
+                      screen = "play"
+              elif id == "title" or id == "settings":
+                  save_game()
+                  screen = id
+              elif id == "vol":
+                  volume = 0.0 if volume <= 0.0 else volume - 0.25
+                  if volume == 0.0 and AudioServer.is_bus_mute(0):
+                      volume = 1.0
+                  apply_settings()
+              elif id == "sens":
+                  sens = 0.5 if sens >= 2.0 else sens + 0.25
+                  apply_settings()
+              elif id == "gfx":
+                  quality = (quality + 1) % 3
+                  apply_settings()
+              elif id == "reset":
+                  DirAccess.remove_absolute("user://save.cfg")
+                  get_tree().reload_current_scene()
+                  return
+              elif id == "cam":
+                  cam_index = (cam_index + 1) % 3
+                  show_cam()
+              elif id.begins_with("buy"):
+                  var i = int(id.substr(3))
+                  if money >= COST[i]:
+                      money -= COST[i]
+                      boxes[i].left += 6
+                      refresh_box(i)
+                      say("Koli depoya geldi")
+                      screen = "play"
+                  else:
+                      say("Para yetmiyor")
+                      screen = "play"
+              elif id == "unlock" and money >= 300:
+                  money -= 300
+                  unlocked[3] = true
+                  screen = "play"
+              elif id == "light_up" and money >= 200:
+                  money -= 200
+                  strong_light = true
+                  apply_light()
+                  screen = "play"
+              elif id == "battery" and money >= 30:
+                  money -= 30
+                  battery = 100.0
+                  screen = "play"
+              elif id in ["unlock", "light_up", "battery"]:
+                  say("Para yetmiyor")
+                  screen = "play"
+              elif id == "close":
+                  screen = "play"
+                  start_night()
+              elif id == "quit":
+                  save_game()
+                  get_tree().quit()
+              if screen != "cams":
+                  feed.render_target_update_mode = SubViewport.UPDATE_DISABLED
+              save_game()
+
+          func apply_settings():
+              AudioServer.set_bus_mute(0, volume <= 0.0)
+              AudioServer.set_bus_volume_db(0, linear_to_db(max(volume, 0.01)))
+              player.sens = sens
+              get_viewport().scaling_3d_scale = [1.0, 0.75, 0.55][quality]
+
+          func show_cam():
+              var views = [[Vector3(-9.5, 3.0, 7.5), Vector3(0, 0.5, -2)], [Vector3(8.5, 3.0, -7.5), Vector3(-2, 0.5, 1)], [Vector3(9.5, 3.0, 7.5), Vector3(14, 0.5, -2)]]
+              feed_cam.look_at_from_position(views[cam_index][0], views[cam_index][1])
+              feed.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+
+          func tag(body, value, y):
+              var label = Label3D.new()
+              label.text = value
+              label.position.y = y
+              label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+              body.add_child(label)
+
+          func build_extras():
+              var dark = material(Color(0.15, 0.2, 0.25))
+              for x in [-9.4, 8.3]:
+                  var locker = solid(Vector3(0.8, 2.0, 0.6), Vector3(x, 1.0, -7.4), dark, {"t": "hide", "p": Vector3(x, 0.05, -7.4), "r": PI, "h": 1.6}, false)
+                  tag(locker, "Dolap (saklan)", 1.2)
+              var under = solid(Vector3(0.5, 0.6, 0.5), Vector3(-4.4, 0.3, 4.2), dark, {"t": "hide", "p": Vector3(-6.0, 0.05, 3.7), "r": PI, "h": 0.6}, false)
+              tag(under, "Kasa altı", 0.6)
+              var bin = solid(Vector3(0.6, 0.8, 0.6), Vector3(7.8, 0.4, 5.5), material(Color(0.1, 0.4, 0.15)), {"t": "bin"}, false)
+              tag(bin, "Çöp kutusu", 0.7)
+              var desk = solid(Vector3(0.7, 0.5, 0.2), Vector3(-9.7, 1.4, 4.0), material(Color(0.1, 0.5, 0.6), false, true), {"t": "cams"}, false)
+              tag(desk, "Kameralar", 0.5)
+              var phone = solid(Vector3(0.25, 0.15, 0.25), Vector3(-5.1, 1.1, 4.2), material(Color(0.7, 0.05, 0.05)), {"t": "phone"}, false)
+              tag(phone, "Telefon", 0.25)
+              var places = [Vector3(-9.6, 1.0, -2.0), Vector3(6.5, 1.0, -7.7), Vector3(15.6, 1.0, 1.5)]
+              for i in 3:
+                  solid(Vector3(0.3, 0.4, 0.3), places[i], material(Color(0.95, 0.9, 0.7), false, true), {"t": "note", "i": i}, false)
+              door = Node3D.new()
+              door.position = Vector3(9.0, 0, -1.5)
+              add_child(door)
+              box_mesh(door, Vector3(0.08, 2.6, 1.4), Vector3(0, 1.3, 0.7), material(Color(0.3, 0.18, 0.1), true))
+              door.rotation.y = -1.5
+              feed = SubViewport.new()
+              feed.size = Vector2i(640, 360)
+              feed.render_target_update_mode = SubViewport.UPDATE_DISABLED
+              add_child(feed)
+              feed_cam = Camera3D.new()
+              feed.add_child(feed_cam)
+              feed_cam.current = true
+              view = Node3D.new()
+              view.position = Vector3(0.28, -0.3, -0.65)
+              player.cam.add_child(view)
+              spawn_jobs()
+
+          func spawn_jobs():
+              for d in dirt:
+                  d.queue_free()
+              dirt.clear()
+              jobs = {"mop": 0, "trash": 0, "skt": 0}
+              for p in [Vector3(-7.0, 0.03, -3.0), Vector3(2.5, 0.03, 2.5), Vector3(7.0, 0.03, -3.5)]:
+                  dirt.append(solid(Vector3(0.9, 0.04, 0.9), p, material(Color(0.2, 0.14, 0.05)), {"t": "mop"}, false))
+              for p in [Vector3(-8.5, 0.2, 6.5), Vector3(7.5, 0.2, 1.8), Vector3(-1.8, 0.2, 3.0)]:
+                  var bag = solid(Vector3(0.4, 0.4, 0.4), p, null, {"t": "trash"}, false)
+                  bag.add_child(product(100))
+                  dirt.append(bag)
+              var u = units[randi() % 3]
+              u.count = max(u.count, 1)
+              u.bad = true
+              for i in 3:
+                  refresh_unit(i)
+
+          func update_view():
+              if shown == [held, bad]:
+                  return
+              shown = [held, bad]
+              for c in view.get_children():
+                  c.queue_free()
+              if held == -1:
+                  return
+              view.add_child(product(held))
+              for x in [-0.17, 0.17]:
+                  var hand = box_mesh(view, Vector3(0.08, 0.08, 0.35), Vector3(x, -0.1, 0.12), material(Color(0.85, 0.65, 0.5)))
+                  hand.rotation.x = 0.35
+
+          func _process(_delta):
+              if view == null:
+                  return
+              update_view()
+
+          func cell_of(p):
+              var c = Vector2i(((Vector2(p.x, p.z) - ORIGIN) / CELL).floor())
+              c = c.clamp(Vector2i.ZERO, grid.region.size - Vector2i.ONE)
+              if not grid.is_point_solid(c):
+                  return c
+              for r in range(1, 6):
+                  for dx in range(-r, r + 1):
+                      for dy in range(-r, r + 1):
+                          var n = c + Vector2i(dx, dy)
+                          if grid.region.has_point(n) and not grid.is_point_solid(n):
+                              return n
+              return c
+
+          func route(from, to):
+              var out = []
+              for c in grid.get_id_path(cell_of(from), cell_of(to)):
+                  var w = ORIGIN + (Vector2(c) + Vector2(0.5, 0.5)) * CELL
+                  out.append(Vector3(w.x, 0.0, w.y))
+              return out
+
+          func figure(shirt, skin, height):
+              var a = Actor.new()
+              var body = CapsuleMesh.new()
+              body.radius = 0.24
+              body.height = 0.8
+              mesh(a, body, Vector3(0, 1.15, 0), material(shirt))
+              var head = SphereMesh.new()
+              head.radius = 0.17
+              head.height = 0.36
+              mesh(a, head, Vector3(0, 1.72, 0), material(skin))
+              for x in [-0.12, 0.12]:
+                  var hip = Node3D.new()
+                  hip.position = Vector3(x, 0.8, 0)
+                  a.add_child(hip)
+                  box_mesh(hip, Vector3(0.16, 0.8, 0.18), Vector3(0, -0.4, 0), material(Color(0.12, 0.13, 0.2)))
+                  a.legs.append(hip)
+              for x in [-0.32, 0.32]:
+                  box_mesh(a, Vector3(0.11, 0.7, 0.13), Vector3(x, 1.1, 0), material(shirt))
+              a.scale.y = height
+              var model = "res://assets/models/%s.glb" % ("monster" if height > 1.2 else "customer")
+              if ResourceLoader.exists(model):
+                  for child in a.get_children():
+                      child.visible = false
+                  var scene = load(model).instantiate()
+                  a.add_child(scene)
+                  for p in scene.find_children("*", "AnimationPlayer", true, false):
+                      if p.has_animation("walk"):
+                          p.get_animation("walk").loop_mode = Animation.LOOP_LINEAR
+                          p.play("walk")
+              add_child(a)
+              return a
+
+          func spawn_customer():
+              var options = []
+              for i in units.size():
+                  if unlocked[i]:
+                      options.append(i)
+              var c = figure(Color.from_hsv(randf(), 0.6, 0.7), Color(0.85, 0.65, 0.5), randf_range(0.92, 1.05))
+              c.position = Vector3(0, 0, 7.0)
+              c.unit = options.pick_random()
+              c.wants = [c.unit]
+              if randf() < 0.5:
+                  c.wants.append(options.pick_random())
+              c.speed = 1.8
+              c.path = route(c.position, units[c.unit].stand)
+              customers.append(c)
+
+          func queue_spot(n):
+              return Vector3(-6.0 + n * 0.8, 0.0, 5.5)
+
+          func update_customers(delta):
+              var paying = 0
+              for c in customers.duplicate():
+                  var arrived = c.walk(delta)
+                  if c.state == "pay":
+                      c.wait += delta
+                      if arrived:
+                          c.rotation.y = PI
+                      paying += 1
+                      if c.wait > 60.0:
+                          leave(c)
+                  elif arrived and c.state == "shop":
+                      if units[c.unit].count > 0:
+                          units[c.unit].count -= 1
+                          refresh_unit(c.unit)
+                          c.total += PRICE[c.unit]
+                          c.wants.pop_front()
+                          c.wait = 0.0
+                          if c.wants.is_empty():
+                              c.state = "pay"
+                              c.path = route(c.position, queue_spot(paying))
+                              paying += 1
+                          else:
+                              c.unit = c.wants[0]
+                              c.path = route(c.position, units[c.unit].stand)
+                      else:
+                          c.wait += delta
+                          if c.wait > 8.0:
+                              say("Müşteri %s bulamadı" % NAMES[c.unit])
+                              leave(c)
+                  elif arrived and c.state == "leave":
+                      customers.erase(c)
+                      c.queue_free()
+
+          func leave(c):
+              c.state = "leave"
+              c.path = route(c.position, Vector3(0, 0, 7.0))
+
+          func serve():
+              for c in customers:
+                  if c.state == "pay" and c.path.is_empty():
+                      money += c.total
+                      earned += c.total
+                      award("İlk satış")
+                      if tut == 2:
+                          tut = 3
+                      sold += 1
+                      if sold == 5:
+                          money += 100
+                          say("Görev tamam! +100 TL")
+                      else:
+                          say("Satış: +%d TL" % c.total)
+                      sfx.play("beep")
+                      leave(c)
+                      var n = 0
+                      for other in customers:
+                          if other.state == "pay":
+                              other.path = route(other.position, queue_spot(n))
+                              n += 1
+                      save_game()
+                      return true
+              say("Kasada bekleyen müşteri yok")
+              return false
+
+          func set_fuse(i, on):
+              fuses[i].on = on
+              fuses[i].lamp.material_override = material(Color.GREEN if on else Color.RED, false, true)
+
+          func start_night():
+              night = true
+              clock = NIGHT_LEN
+              event_done = false
+              guest_done = false
+              event_in = 20.0
+              for c in customers:
+                  c.queue_free()
+              customers.clear()
+              set_lights(false)
+              for i in 3:
+                  set_fuse(i, false)
+              kind = (day - 1) % 3
+              var skin = [Color(0.7, 0.68, 0.6), Color(0.5, 0.1, 0.1), Color(0.05, 0.05, 0.08)][kind]
+              creature = figure(Color(0.03, 0.02, 0.02), skin, 1.35)
+              for x in [-0.06, 0.06]:
+                  box_mesh(creature, Vector3(0.05, 0.03, 0.03), Vector3(x, 1.75, 0.16), material(Color.RED, false, true))
+              creature.position = Vector3(13.0, 0, 6.0) if player.position.x < 3.0 else Vector3(-8.0, 0, -6.0)
+              creature.speed = min(1.9 + day * 0.15, 3.4)
+              creature.wait = 8.0
+              sfx.play("thud")
+              say("Elektrik gitti. 3 sigortayı aç. Feneri yak!")
+
+          func clear_night():
+              night = false
+              clock = DAY_LEN
+              sold = 0
+              spawn_in = 6.0
+              ring_left = 0.0
+              if player.hidden:
+                  unhide()
+              if creature != null:
+                  creature.queue_free()
+                  creature = null
+              if guest != null:
+                  guest.queue_free()
+                  guest = null
+              for n in ragdoll:
+                  n.queue_free()
+              ragdoll.clear()
+              door.rotation.y = -1.5
+              set_lights(true)
+              for i in 3:
+                  set_fuse(i, true)
+              spawn_jobs()
+
+          func end_night():
+              clear_night()
+              day += 1
+              money += 80
+              earned += 80
+              award("İlk gece")
+              screen = "summary"
+              save_game()
+
+          func caught():
+              scare = 1.6
+              sfx.play("scream", 4.0)
+              if not smoke:
+                  Input.vibrate_handheld(600)
+              money = max(money - 60, 0)
+              clear_night()
+              earned = 0
+              player.position = Vector3(-6.0, 0.05, 2.5)
+              screen = "over"
+              save_game()
+
+          func random_event():
+              var pick = randi() % 3
+              if pick == 0:
+                  var i = randi() % 2
+                  var at = units[i].stand + Vector3(0, 1.4, 0)
+                  for k in min(units[i].count, 3):
+                      units[i].count -= 1
+                      var r = RigidBody3D.new()
+                      r.collision_layer = 8
+                      r.collision_mask = 1
+                      var c = CollisionShape3D.new()
+                      var shape = BoxShape3D.new()
+                      shape.size = Vector3(0.28, 0.4, 0.28)
+                      c.shape = shape
+                      r.add_child(c)
+                      r.add_child(product(i))
+                      r.set_meta("act", {"t": "item", "i": i})
+                      r.position = at + Vector3(-0.4, 0, k * 0.4)
+                      add_child(r)
+                      ragdoll.append(r)
+                  refresh_unit(i)
+                  sfx.play_at("thud", at)
+              elif pick == 1:
+                  create_tween().tween_property(door, "rotation:y", 0.0 if door.rotation.y < -0.5 else -1.5, 1.2)
+                  sfx.play_at("thud", door.position)
+              else:
+                  ring_left = 8.0
+
+          func update_night(delta):
+              if not event_done and clock < NIGHT_LEN - 8.0:
+                  event_done = true
+                  drop_mannequin()
+              event_in -= delta
+              if event_in <= 0.0:
+                  event_in = randf_range(18.0, 30.0)
+                  random_event()
+              if ring_left > 0.0:
+                  if int(ring_left * 0.5) != int((ring_left - delta) * 0.5):
+                      sfx.play_at("ring", Vector3(-5.1, 1.1, 4.2))
+                  ring_left -= delta
+              if not guest_done and clock < NIGHT_LEN * 0.5:
+                  guest_done = true
+                  guest = figure(Color(0.8, 0.8, 0.85), Color(0.9, 0.9, 0.95), 1.15)
+                  guest.position = queue_spot(0)
+                  guest.rotation.y = PI
+                  guest.wait = 15.0
+                  say("03:00. Kasada biri bekliyor. Kuralı hatırla.")
+              if guest != null:
+                  guest.wait -= delta
+                  if guest.wait <= 0.0:
+                      guest.queue_free()
+                      guest = null
+                      money += 50
+                      earned += 50
+                      say("Garip müşteri gitti. +50 TL")
+              if clock <= 0.0:
+                  end_night()
+                  return
+              if creature.wait > 0.0:
+                  creature.wait -= delta
+                  return
+              var to = creature.position - player.position
+              to.y = 0.0
+              var facing = -player.transform.basis.z
+              var lit = player.light.visible and to.length() < 9.0 and facing.dot(to.normalized()) > 0.85
+              var mult = 0.4 if lit else 1.0
+              if kind == 1:
+                  mult = 1.5 if player.move.length() > 0.1 and not player.hidden else 0.25
+              elif kind == 2:
+                  mult = 0.0 if lit else 1.2
+              if player.hidden:
+                  if creature.path.is_empty():
+                      creature.path = route(creature.position, Vector3(randf_range(-8, 8), 0, randf_range(-6, 6)))
+              else:
+                  phase_route(delta)
+              creature.walk(delta, mult)
+              step_in -= delta * mult
+              if step_in <= 0.0:
+                  step_in = 0.55
+                  sfx.play_at("step", creature.position)
+              if to.length() < 0.9 and not player.hidden:
+                  caught()
+
+          func part(size, pos):
+              var r = RigidBody3D.new()
+              r.collision_layer = 4
+              r.collision_mask = 1
+              var c = CollisionShape3D.new()
+              var s = BoxShape3D.new()
+              s.size = size
+              c.shape = s
+              r.add_child(c)
+              box_mesh(r, size, Vector3.ZERO, material(Color(0.8, 0.7, 0.6)))
+              r.position = pos
+              add_child(r)
+              ragdoll.append(r)
+              return r
+
+          func pin(a, b, pos):
+              var j = PinJoint3D.new()
+              j.position = pos
+              add_child(j)
+              j.node_a = a.get_path()
+              j.node_b = b.get_path()
+              ragdoll.append(j)
+
+          func drop_mannequin():
+              var ahead = player.position - player.transform.basis.z * 2.0
+              var o = Vector3(clamp(ahead.x, -9.0, 8.0), 2.2, clamp(ahead.z, -7.0, 7.0))
+              var torso = part(Vector3(0.45, 0.65, 0.25), o)
+              var head = part(Vector3(0.28, 0.28, 0.28), o + Vector3(0, 0.5, 0))
+              pin(torso, head, o + Vector3(0, 0.34, 0))
+              for x in [-0.34, 0.34]:
+                  var arm = part(Vector3(0.13, 0.6, 0.13), o + Vector3(x, 0, 0))
+                  pin(torso, arm, o + Vector3(x * 0.75, 0.3, 0))
+              for x in [-0.13, 0.13]:
+                  var leg = part(Vector3(0.17, 0.7, 0.17), o + Vector3(x, -0.7, 0))
+                  pin(torso, leg, o + Vector3(x, -0.34, 0))
+              torso.angular_velocity = Vector3(3, 1, 2)
+              sfx.play("thud", 6.0)
+              sfx.play("scream", -10.0)
+
+
+          var repath = 0.0
+
+          func phase_route(delta):
+              repath -= delta
+              if repath <= 0.0 or creature.path.is_empty():
+                  repath = 0.5
+                  var p = route(creature.position, player.position)
+                  if p.size() > 1:
+                      p.remove_at(0)
+                  p.append(Vector3(player.position.x, 0, player.position.z))
+                  creature.path = p
+
+          func _physics_process(delta):
+              message_time -= delta
+              if scare > 0.0:
+                  scare -= delta
+                  return
+              if screen != "play" and screen != "cams":
+                  return
+              if player.light.visible:
+                  battery = max(battery - delta * 0.8, 0.0)
+                  if battery <= 0.0:
+                      player.light.visible = false
+              elif not night:
+                  battery = min(battery + delta * 2.0, 100.0)
+              clock -= delta
+              if night:
+                  update_night(delta)
+                  return
+              spawn_in -= delta
+              if spawn_in <= 0.0 and customers.size() < 4:
+                  spawn_in = randf_range(8.0, 14.0)
+                  spawn_customer()
+              update_customers(delta)
+              if clock <= 0.0:
+                  start_night()
+
+          func save_game():
+              if smoke or shot:
+                  return
+              var f = ConfigFile.new()
+              f.set_value("s", "money", money)
+              f.set_value("s", "day", day)
+              f.set_value("s", "unlocked", unlocked)
+              f.set_value("s", "light", strong_light)
+              for key in ["tut", "volume", "sens", "quality", "notes", "awards"]:
+                  f.set_value("s", key, get(key))
+              f.set_value("s", "stock", units.map(func(u): return u.count))
+              f.set_value("s", "boxes", boxes.map(func(b): return b.left))
+              f.save("user://save.cfg")
+
+          func load_game():
+              var f = ConfigFile.new()
+              if smoke or shot or f.load("user://save.cfg") != OK:
+                  return
+              money = f.get_value("s", "money", money)
+              day = f.get_value("s", "day", day)
+              unlocked = f.get_value("s", "unlocked", unlocked)
+              strong_light = f.get_value("s", "light", strong_light)
+              for key in ["tut", "volume", "sens", "quality", "notes", "awards"]:
+                  set(key, f.get_value("s", key, get(key)))
+
+          func load_stock():
+              var f = ConfigFile.new()
+              if smoke or shot or f.load("user://save.cfg") != OK:
+                  return
+              var stock = f.get_value("s", "stock", [])
+              var left = f.get_value("s", "boxes", [])
+              for i in min(stock.size(), units.size()):
+                  units[i].count = stock[i]
+                  refresh_unit(i)
+              for i in min(left.size(), boxes.size()):
+                  boxes[i].left = left[i]
+                  refresh_box(i)
+
+          func _notification(what):
+              if what == NOTIFICATION_APPLICATION_PAUSED and player != null:
+                  save_game()
+
+          func check(ok, label):
+              print("CHECK ", label, ": ", ok)
+              if not ok:
+                  print("SMOKE FAIL ", label)
+                  get_tree().quit(1)
+              return ok
+
+          func frames(n):
+              for i in n:
+                  await get_tree().physics_frame
+
+          func run_smoke():
+              await frames(5)
+              units[0].bad = false
+              units[0].count = 3
+              use({"t": "box", "i": 0})
+              use({"t": "box", "i": 0})
+              await frames(2)
+              if not check(held == 0 and view.get_child_count() > 0, "elde gorunen urun"):
+                  return
+              use({"t": "unit", "i": 0})
+              if not check(held == -1 and units[0].count == 4, "rafa koyma"):
+                  return
+              spawn_in = 9999.0
+              spawn_customer()
+              for i in 1500:
+                  await get_tree().physics_frame
+                  if customers.size() > 0 and customers[0].state == "pay" and customers[0].path.is_empty():
+                      break
+              var before = money
+              if not check(serve() and money > before, "musteri ve kasa"):
+                  return
+              start_night()
+              clock = NIGHT_LEN - 9.0
+              await frames(60)
+              if not check(ragdoll.size() > 0 and creature != null, "gece olayi"):
+                  return
+              for i in 3:
+                  use({"t": "fuse", "i": i})
+              random_event()
+              clock = 0.01
+              await frames(3)
+              if not check(not night and day == 2 and screen == "summary", "06:00 vardiya sonu"):
+                  return
+              for id in ["title", "settings", "gfx", "sens", "vol", "title", "start", "next"]:
+                  menu_action(id)
+                  panel()
+              screen = "play"
+              start_night()
+              creature.wait = 0.0
+              creature.position = player.position
+              await frames(5)
+              if not check(not night and screen == "over", "game over"):
+                  return
+              print("SMOKE OK")
+              get_tree().quit(0)
+
+          func run_shot():
+              var dir = OS.get_environment("SHOT_DIR")
+              await frames(20)
+              await RenderingServer.frame_post_draw
+              get_viewport().get_texture().get_image().save_png(dir + "/1_ana_menu.png")
+              screen = "play"
+              tut = 3
+              held = 1
+              player.position = Vector3(-2.0, 0.05, 3.0)
+              player.rotation.y = -0.5
+              player.cam.rotation.x = -0.15
+              spawn_customer()
+              await frames(90)
+              await RenderingServer.frame_post_draw
+              get_viewport().get_texture().get_image().save_png(dir + "/2_market.png")
+              start_night()
+              player.light.visible = true
+              creature.position = player.position - player.transform.basis.z * 3.0
+              await frames(10)
+              await RenderingServer.frame_post_draw
+              get_viewport().get_texture().get_image().save_png(dir + "/3_gece.png")
+              get_tree().quit()
+          KAOS_EOF
+          if [ -d assets ]; then cp -r assets game/; fi
+
+      - name: Projeyi içe aktar
+        run: |
+          set -euo pipefail
+          timeout 600 godot --headless --path game --import 2>&1 | tee import.log
+
+      - name: Oynanış testi (script hatası varsa durur)
+        run: |
+          set -euo pipefail
+          timeout 300 godot --headless --fixed-fps 30 --path game -- --smoke 2>&1 | tee smoke.log
+          if grep -E "SCRIPT ERROR|Parse Error|SMOKE FAIL" smoke.log; then exit 1; fi
+          grep -q "SMOKE OK" smoke.log
+
+      - name: Oyun içi görüntüler
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          command -v xvfb-run >/dev/null || { sudo apt-get update && sudo apt-get install -y xvfb libgl1-mesa-dri; }
+          mkdir -p shots
+          SHOT_DIR="$PWD/shots" timeout 300 xvfb-run -a -s "-screen 0 1280x720x24" godot --rendering-driver opengl3 --audio-driver Dummy --path game -- --shot 2>&1 | tee shot.log
+
+      - name: Görüntüleri yükle
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ekran-goruntuleri
+          path: shots/*.png
+
+      - name: APK derle
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          timeout 900 godot --headless --path game --export-debug "Android" "$PWD/out/KaosMarket.apk" 2>&1 | tee export.log
+          test -s out/KaosMarket.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify out/KaosMarket.apk
+
+      - name: APK yükle
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: KaosMarket-APK
+          path: out/KaosMarket.apk
+          if-no-files-found: error
+
+      - name: İndirme bağlantısı
+        run: echo "### [APK indir](${{ steps.upload.outputs.artifact-url }})" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Hata kayıtlarını yükle
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: "*.log"
+          if-no-files-found: ignore
