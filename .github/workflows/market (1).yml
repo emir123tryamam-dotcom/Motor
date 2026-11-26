@@ -1,0 +1,2658 @@
+name: KAOS MARKET NIGHT SHIFT - Android
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build.yml'
+      - '.github/workflows/market.yml'
+      - 'assets/**'
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout (optional assets folder)
+        uses: actions/checkout@v4
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+      - name: SDK components
+        run: |
+          set -eux
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - name: Download Godot and Android export templates
+        run: |
+          set -eux
+          G=4.4.1
+          wget -q --tries=5 --retry-connrefused --waitretry=3 "https://github.com/godotengine/godot/releases/download/${G}/Godot_v${G}-stable_linux.x86_64.zip" -O godot.zip
+          wget -q --tries=5 --retry-connrefused --waitretry=3 "https://github.com/godotengine/godot/releases/download/${G}/Godot_v${G}-stable_export_templates.tpz" -O templates.tpz
+          unzip -q godot.zip -d godot-bin
+          chmod +x godot-bin/Godot_v${G}-stable_linux.x86_64
+          mkdir -p "$HOME/.local/share/godot/export_templates/${G}.stable"
+          unzip -q templates.tpz -d templates-unpacked
+          cp -a templates-unpacked/templates/. "$HOME/.local/share/godot/export_templates/${G}.stable/"
+          test -f "$HOME/.local/share/godot/export_templates/${G}.stable/android_debug.apk"
+          mkdir -p "$HOME/.config/godot" "$HOME/.android"
+          keytool -genkeypair -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -keystore "$HOME/.android/debug.keystore" -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US" || true
+          cat > "$HOME/.config/godot/editor_settings-4.4.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+          [resource]
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/debug_keystore = "$HOME/.android/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOF
+      - name: Generate game project (single-file workflow)
+        run: |
+          set -eux
+          mkdir -p game output
+          if [ -d assets ]; then cp -r assets game/; fi
+          cd game
+          python3 - <<'PY'
+          import zlib, struct
+          W = 192
+          rows = []
+          for y in range(W):
+              row = bytearray([0])
+              for x in range(W):
+                  dx, dy = x - 96, y - 96
+                  d = (dx * dx + dy * dy) ** 0.5
+                  up = 82 < x < 130 and y <= 96 and abs((96 - y) - (x - 82) * 0.8) < 6
+                  lo = 82 < x < 130 and y >= 96 and abs((y - 96) - (x - 82) * 0.8) < 6
+                  if 46 < d < 62:
+                      c = (200, 30, 30)
+                  elif (66 <= x <= 80 and 60 <= y <= 132) or up or lo:
+                      c = (240, 240, 240)
+                  else:
+                      c = (12 + y // 12, 12, 22)
+                  row += bytes(c)
+              rows.append(bytes(row))
+          raw = b''.join(rows)
+          def ch(t, d):
+              return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+          open('icon.png', 'wb').write(b'\x89PNG\r\n\x1a\n' + ch(b'IHDR', struct.pack('>IIBBBBB', W, W, 8, 2, 0, 0, 0)) + ch(b'IDAT', zlib.compress(raw)) + ch(b'IEND', b''))
+          PY
+          cat > project.godot <<'PROJ'
+          config_version=5
+          [application]
+          config/name="KAOS MARKET: NIGHT SHIFT"
+          run/main_scene="res://main.tscn"
+          config/icon="res://icon.png"
+          [audio]
+          driver/enable_input=true
+          [display]
+          window/size/viewport_width=1280
+          window/size/viewport_height=720
+          window/size/window_width_override=1280
+          window/size/window_height_override=720
+          window/handheld/orientation=4
+          window/stretch/mode="canvas_items"
+          window/stretch/aspect="keep"
+          [rendering]
+          renderer/rendering_method="mobile"
+          renderer/rendering_method.mobile="mobile"
+          textures/vram_compression/import_etc2_astc=true
+          environment/defaults/default_clear_color=Color(0.025,0.025,0.035,1)
+          PROJ
+          cat > export_presets.cfg <<'PRESETS'
+          [preset.0]
+          name="Android"
+          platform="Android"
+          runnable=true
+          dedicated_server=false
+          custom_features=""
+          export_filter="all_resources"
+          include_filter=""
+          exclude_filter=""
+          export_path="../output/KAOS_MARKET_NIGHT_SHIFT.apk"
+          encryption_include_filters=""
+          encryption_exclude_filters=""
+          encrypt_pck=false
+          encrypt_directory=false
+          [preset.0.options]
+          package/unique_name="com.kaosmarket.nightshift"
+          package/name="KAOS MARKET NIGHT SHIFT"
+          version/code=3
+          version/name="0.3.0"
+          architectures/arm64-v8a=true
+          architectures/armeabi-v7a=false
+          architectures/x86=false
+          architectures/x86_64=false
+          permissions/internet=true
+          permissions/access_wifi_state=true
+          permissions/access_network_state=true
+          permissions/record_audio=true
+          launcher_icons/main_192x192="res://icon.png"
+          [preset.1]
+          name="Android AAB"
+          platform="Android"
+          runnable=false
+          dedicated_server=false
+          custom_features=""
+          export_filter="all_resources"
+          include_filter=""
+          exclude_filter=""
+          export_path="../output/KAOS_MARKET_NIGHT_SHIFT.aab"
+          encryption_include_filters=""
+          encryption_exclude_filters=""
+          encrypt_pck=false
+          encrypt_directory=false
+          [preset.1.options]
+          gradle_build/use_gradle_build=true
+          gradle_build/export_format=1
+          gradle_build/min_sdk="24"
+          gradle_build/target_sdk="35"
+          package/unique_name="com.kaosmarket.nightshift"
+          package/name="KAOS MARKET NIGHT SHIFT"
+          package/signed=true
+          version/code=3
+          version/name="0.3.0"
+          architectures/arm64-v8a=true
+          architectures/armeabi-v7a=false
+          architectures/x86=false
+          architectures/x86_64=false
+          permissions/internet=true
+          permissions/access_wifi_state=true
+          permissions/access_network_state=true
+          permissions/record_audio=true
+          launcher_icons/main_192x192="res://icon.png"
+          PRESETS
+          cat > main.tscn <<'SCENE'
+          [gd_scene load_steps=2 format=3]
+          [ext_resource type="Script" path="res://main.gd" id="1"]
+          [node name="Game" type="Node3D"]
+          script = ExtResource("1")
+          SCENE
+          cat > main.gd <<'SCRIPT'
+          extends Node3D
+
+          const WALK := 3.8
+          const RUN := 5.8
+          const PORT := 24565
+          const ITEM_COUNT := 20
+          const TRASH_COUNT := 4
+          const RACK_CAP := 6
+          const NIGHT_LEN := 300.0
+          const SAVE := "user://kaos.cfg"
+          const VRATE := 12000
+          const SPAWN := Vector3(0, 0.1, 8)
+          const CHECKOUT := Vector3(0, 0, -10.3)
+          const FUSE := Vector3(-12.0, 0, 2.0)
+          const DUMP := Vector3(-10, 0, 7.2)
+          const HIDES := [Vector3(11.9, 0, 9.6), Vector3(0, 0, -11.9)]
+          const SPILLS := [Vector3(-5.75, 0.02, -2.0), Vector3(0, 0.02, 1.5), Vector3(5.75, 0.02, -6.0), Vector3(-5.75, 0.02, 5.0), Vector3(8, 0.02, 0.5), Vector3(0, 0.02, -7.0)]
+          const NAV_X := [-11.0, -8.0, -5.75, -3.5, 0.0, 3.5, 5.75, 8.0]
+          const NAV_Z := [-8.0, -3.5, 1.5, 6.5]
+          const CROSS_X := [-11.0, -5.75, 0.0, 5.75]
+          const PRICES := {"speed": 60, "light": 45, "price": 90, "delivery": 40}
+          const OUTFITS := [Color(0.1, 0.3, 0.6), Color(0.75, 0.12, 0.1), Color(0.15, 0.5, 0.2), Color(0.85, 0.7, 0.15)]
+          const OUTFIT_NAMES := ["Mavi", "Kırmızı", "Yeşil", "Altın"]
+          const EXP_COL := Color(0.45, 0.55, 0.15)
+          const NOTES := [
+              "Not 1: 'Önceki gece bekçisi sabah gelmedi. Geriye sadece fener ve bir kural listesi kaldı.'",
+              "Not 2: 'Kameralar bazen boş koridorda birini gösteriyor. Sayma, bakma.'",
+              "Not 3: 'Gölge ışıktan korkar. Sürüngen karanlıkta hızlanır.'",
+              "Not 4: 'Fısıldayan sadece çok yakındayken görünür. Sesini dinle.'",
+              "Not 5: 'Müşteri 03:00'te geliyorsa o bir müşteri değildir.'",
+              "Not 6: 'Market on yıl önce kapanmıştı. Tabelayı kim yeniden yaktı?'",
+              "Not 7: 'Sabah 06:00'da vardiya bitmez. Gece sadece bir an durur.'"]
+          const ENDINGS := [
+              "SON: SESSİZ SABAH - Hiçbir kuralı çiğnemeden sabaha çıktın. Market sana bir gece daha izin verdi.",
+              "SON: DÖNGÜ - Kuralları çiğnedin. Kapı kilitlendi ve gece yeniden başladı.",
+              "SON: GERÇEK - Notları birleştirdin: market seni bekçi olarak seçmişti. Artık kuralların bir parçasısın."]
+          const ACH := {"first_sale": "İlk satış", "sales10": "10 satış", "night1": "İlk gece sağ çıktın", "night3": "3 gece sağ çıktın", "rule": "Kurala uydun", "fix": "Elektrikçi", "clean": "Temizlikçi (10 görev)", "revive": "Kurtarıcı", "hide": "Saklambaç", "ending": "Bir son gördün"}
+
+          var player: CharacterBody3D
+          var cam: Camera3D
+          var flashlight: SpotLight3D
+          var hud: CanvasLayer
+          var hint: Label
+          var objective: Label
+          var dark: ColorRect
+          var bat_bar: ProgressBar
+          var sta_bar: ProgressBar
+          var panels: Array = []
+          var menu_panel: Panel
+          var menu_title: Label
+          var menu_play: Button
+          var menu_outfit: Button
+          var set_panel: Panel
+          var gfx_btn: Button
+          var ach_panel: Panel
+          var ach_label: Label
+          var help_panel: Panel
+          var shop_panel: Panel
+          var net_panel: Panel
+          var net_info: Label
+          var ip_edit: LineEdit
+          var cctv_panel: Panel
+          var cctv_title: Label
+          var cctv_cams: Array = []
+          var cctv_idx := 0
+          var sum_panel: Panel
+          var sum_label: Label
+          var over_panel: Panel
+          var over_label: Label
+          var joy_base: ColorRect
+          var action_buttons: Array[Button] = []
+          var move_touch := -1
+          var look_touch := -1
+          var move_origin := Vector2.ZERO
+          var touch_move := Vector2.ZERO
+          var yaw := 0.0
+          var pitch := 0.0
+          var is_running := false
+          var light_on := true
+          var mode := "menu"
+          var in_run := false
+          var env_res: Environment
+
+          # settings + save
+          var cfg_vol := 0.8
+          var cfg_sens := 0.004
+          var cfg_gfx := 1
+          var outfit := 0
+          var unlocked: Array = [0]
+          var ach: Dictionary = {}
+          var notes_found: Array = []
+          var endings: Array = []
+          var broken := 0
+          var total_sales := 0
+          var tasks_done := 0
+
+          # shared state (authoritative on host / solo)
+          var money := 120.0
+          var sales := 0
+          var stocked := 0
+          var night := 1
+          var day_clock := 0.0
+          var event_clock := 0.0
+          var rand_timer := 20.0
+          var power_timer := 80.0
+          var phone_t := 0.0
+          var trash_timer := 40.0
+          var exp_timer := 40.0
+          var fuse_taps := 0
+          var power := true
+          var note_shown := false
+          var night_money0 := 0.0
+          var night_sales0 := 0
+          var upgrades := {"speed": 0, "light": 0, "price": 0}
+          var items: Array[RigidBody3D] = []
+          var item_state: Array[int] = []   # 0 world, -1 consumed, >0 carrier peer id
+          var racks: Array = []
+          var rack_exp: Array = []
+          var spill_on: Array = []
+          var spill_nodes: Array = []
+          var customers: Array = []
+          var stranger: Dictionary = {}
+          var monster: Node3D
+          var m_state := "hidden"
+          var m_type := 0
+          var m_path: Array = []
+          var m_timer := 0.0
+          var m_lit := 0.0
+          var m_step_t := 0.0
+          var m_target := Vector3.ZERO
+          var peers := {}
+          var avatars := {}
+          var down_t := {}
+          var tgt := {}
+
+          # local player state
+          var battery := 100.0
+          var stamina := 100.0
+          var hidden_in := -1
+          var hide_prev := Vector3.ZERO
+
+          var astar := AStar3D.new()
+          var lamps: Array[OmniLight3D] = []
+          var sounds := {}
+          var streams := {}
+          var heart_t := 0.0
+          var step_timer := 0.0
+          var net_timer := 0.0
+          var rec_timer := 0.0
+          var ext_ip := ""
+          var record: Array = []
+          var replaying := false
+          var replay_fp := false
+          var replay_index := 0.0
+          var replay_root: Node3D
+          var replay_cam: Camera3D
+
+          # voice chat
+          var talking := false
+          var voice_ok := false
+          var capture: AudioEffectCapture
+          var mic_player: AudioStreamPlayer
+          var voice_pb := {}
+          var voice_nodes := {}
+
+          func _ready() -> void:
+              randomize()
+              load_game()
+              build_nav()
+              build_world()
+              build_player()
+              build_items()
+              for i in range(3):
+                  build_customer(i)
+              build_stranger()
+              build_monster()
+              build_audio()
+              build_hud()
+              multiplayer.peer_connected.connect(on_peer_connected)
+              multiplayer.peer_disconnected.connect(on_peer_disconnected)
+              multiplayer.connected_to_server.connect(func(): status("Sunucuya bağlandı"))
+              multiplayer.connection_failed.connect(func(): go_offline("Bağlantı başarısız"))
+              multiplayer.server_disconnected.connect(func(): go_offline("Sunucu kapandı"))
+              apply_settings()
+              open_menu()
+
+          func _notification(what: int) -> void:
+              if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST:
+                  save_game()
+
+          # ---------- helpers ----------
+          func online() -> bool:
+              return multiplayer.multiplayer_peer is ENetMultiplayerPeer
+
+          func is_host() -> bool:
+              return not online() or multiplayer.is_server()
+
+          func my_id() -> int:
+              return multiplayer.get_unique_id() if online() else 1
+
+          func clock_min() -> float:
+              return day_clock * 420.0 / NIGHT_LEN
+
+          func spawn_gap() -> float:
+              return maxf(18.0, 45.0 - 5.0 * night)
+
+          func mat(c: Color, rough: float = 0.8) -> StandardMaterial3D:
+              var m := StandardMaterial3D.new()
+              m.albedo_color = c
+              m.roughness = rough
+              if c.a < 1.0:
+                  m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+              return m
+
+          func mesh_box(parent: Node, pos: Vector3, size: Vector3, color: Color) -> MeshInstance3D:
+              var mi := MeshInstance3D.new()
+              var bm := BoxMesh.new()
+              bm.size = size
+              mi.mesh = bm
+              mi.material_override = mat(color)
+              mi.position = pos
+              parent.add_child(mi)
+              return mi
+
+          func solid_box(parent: Node, pos: Vector3, size: Vector3, color: Color) -> StaticBody3D:
+              var body := StaticBody3D.new()
+              body.position = pos
+              parent.add_child(body)
+              mesh_box(body, Vector3.ZERO, size, color)
+              var cs := CollisionShape3D.new()
+              var bs := BoxShape3D.new()
+              bs.size = size
+              cs.shape = bs
+              body.add_child(cs)
+              return body
+
+          func mesh_cap(parent: Node, pos: Vector3, r: float, h: float, color: Color, stretch: Vector3 = Vector3.ONE) -> MeshInstance3D:
+              var mi := MeshInstance3D.new()
+              var cm := CapsuleMesh.new()
+              cm.radius = r
+              cm.height = maxf(h, r * 2.0)
+              mi.mesh = cm
+              mi.material_override = mat(color)
+              mi.position = pos
+              mi.scale = stretch
+              parent.add_child(mi)
+              return mi
+
+          func mesh_sph(parent: Node, pos: Vector3, r: float, color: Color, stretch: Vector3 = Vector3.ONE) -> MeshInstance3D:
+              var mi := MeshInstance3D.new()
+              var sm := SphereMesh.new()
+              sm.radius = r
+              sm.height = r * 2.0
+              mi.mesh = sm
+              mi.material_override = mat(color)
+              mi.position = pos
+              mi.scale = stretch
+              parent.add_child(mi)
+              return mi
+
+          func label3d(text: String, pos: Vector3) -> void:
+              var l := Label3D.new()
+              l.text = text
+              l.position = pos
+              l.pixel_size = 0.008
+              l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+              l.modulate = Color(1, 1, 1, 0.8)
+              add_child(l)
+
+          func status(s: String) -> void:
+              hint.text = s
+
+          func say_all(t: String) -> void:
+              status(t)
+              if online():
+                  receive_status.rpc(t)
+
+          # ---------- save / settings ----------
+          func load_game() -> void:
+              var c := ConfigFile.new()
+              if c.load(SAVE) != OK:
+                  return
+              cfg_vol = float(c.get_value("s", "vol", 0.8))
+              cfg_sens = float(c.get_value("s", "sens", 0.004))
+              cfg_gfx = int(c.get_value("s", "gfx", 1))
+              outfit = int(c.get_value("s", "outfit", 0))
+              money = float(c.get_value("g", "money", 120.0))
+              night = int(c.get_value("g", "night", 1))
+              upgrades = c.get_value("g", "up", upgrades)
+              ach = c.get_value("g", "ach", {})
+              notes_found = c.get_value("g", "notes", [])
+              endings = c.get_value("g", "endings", [])
+              unlocked = c.get_value("g", "unlocked", [0])
+              broken = int(c.get_value("g", "broken", 0))
+              total_sales = int(c.get_value("g", "total_sales", 0))
+              tasks_done = int(c.get_value("g", "tasks", 0))
+
+          func save_game() -> void:
+              var c := ConfigFile.new()
+              c.load(SAVE)
+              c.set_value("s", "vol", cfg_vol)
+              c.set_value("s", "sens", cfg_sens)
+              c.set_value("s", "gfx", cfg_gfx)
+              c.set_value("s", "outfit", outfit)
+              if is_host():
+                  c.set_value("g", "money", money)
+                  c.set_value("g", "night", night)
+                  c.set_value("g", "up", upgrades)
+                  c.set_value("g", "ach", ach)
+                  c.set_value("g", "notes", notes_found)
+                  c.set_value("g", "endings", endings)
+                  c.set_value("g", "unlocked", unlocked)
+                  c.set_value("g", "broken", broken)
+                  c.set_value("g", "total_sales", total_sales)
+                  c.set_value("g", "tasks", tasks_done)
+              c.save(SAVE)
+
+          func apply_settings() -> void:
+              AudioServer.set_bus_volume_db(0, linear_to_db(maxf(cfg_vol, 0.001)))
+              var vp := get_viewport()
+              vp.scaling_3d_scale = [0.6, 0.8, 1.0][cfg_gfx]
+              vp.msaa_3d = Viewport.MSAA_2X if cfg_gfx == 2 else Viewport.MSAA_DISABLED
+              if flashlight:
+                  flashlight.shadow_enabled = cfg_gfx == 2
+              if gfx_btn:
+                  gfx_btn.text = ["Grafik: DÜŞÜK", "Grafik: ORTA", "Grafik: YÜKSEK"][cfg_gfx]
+
+          func give(id: String) -> void:
+              if ach.has(id):
+                  return
+              ach[id] = true
+              status("BAŞARIM: " + str(ACH[id]))
+              save_game()
+
+          func unlock(i: int) -> void:
+              if not unlocked.has(i):
+                  unlocked.append(i)
+
+          # ---------- navigation ----------
+          func build_nav() -> void:
+              var id := 0
+              var grid := {}
+              for z in NAV_Z:
+                  for x in NAV_X:
+                      astar.add_point(id, Vector3(x, 0, z))
+                      grid[Vector2(x, z)] = id
+                      id += 1
+              for zi in range(NAV_Z.size()):
+                  for xi in range(NAV_X.size()):
+                      var here: int = grid[Vector2(NAV_X[xi], NAV_Z[zi])]
+                      if xi + 1 < NAV_X.size():
+                          astar.connect_points(here, grid[Vector2(NAV_X[xi + 1], NAV_Z[zi])])
+                      if zi + 1 < NAV_Z.size() and CROSS_X.has(NAV_X[xi]):
+                          astar.connect_points(here, grid[Vector2(NAV_X[xi], NAV_Z[zi + 1])])
+
+          func path_to(from: Vector3, to: Vector3) -> Array:
+              var a := astar.get_closest_point(Vector3(from.x, 0, from.z))
+              var b := astar.get_closest_point(Vector3(to.x, 0, to.z))
+              var out: Array = Array(astar.get_point_path(a, b))
+              out.append(Vector3(to.x, 0, to.z))
+              return out
+
+          func follow(node: Node3D, path: Array, speed: float, delta: float) -> bool:
+              if path.is_empty():
+                  return true
+              var goal: Vector3 = path[0]
+              var diff := goal - node.position
+              diff.y = 0
+              if diff.length() < 0.15:
+                  path.pop_front()
+                  return path.is_empty()
+              node.position += diff.normalized() * min(speed * delta, diff.length())
+              node.rotation.y = atan2(-diff.x, -diff.z)
+              return false
+
+          # ---------- world ----------
+          func build_world() -> void:
+              var dark_c := Color(0.09, 0.085, 0.09)
+              solid_box(self, Vector3(0, -0.15, 0), Vector3(26, 0.3, 26), Color(0.17, 0.17, 0.19))
+              solid_box(self, Vector3(0, 4, -13), Vector3(26, 8, 0.3), dark_c)
+              solid_box(self, Vector3(0, 4, 13), Vector3(26, 8, 0.3), dark_c)
+              solid_box(self, Vector3(-13, 4, 0), Vector3(0.3, 8, 26), dark_c)
+              solid_box(self, Vector3(13, 4, 0), Vector3(0.3, 8, 26), dark_c)
+              mesh_box(self, Vector3(0, 7.8, 0), Vector3(26, 0.2, 26), Color(0.14, 0.14, 0.16))
+              for z in [-6.0, -1.0, 4.0]:
+                  for x in [-8.0, -3.5, 3.5, 8.0]:
+                      build_rack(Vector3(x, 0, z))
+              solid_box(self, CHECKOUT + Vector3(0, 0.6, 0), Vector3(4, 1.2, 1.3), Color(0.22, 0.23, 0.24))
+              mesh_box(self, CHECKOUT + Vector3(1.1, 1.4, -0.2), Vector3(0.5, 0.3, 0.2), Color(0.08, 0.4, 0.2))
+              for i in range(3):
+                  var p := Vector3(10.8, 0, -4.8 + i * 2.1)
+                  solid_box(self, p + Vector3(0, 1.8, 0), Vector3(1.5, 3.6, 1.8), Color(0.13, 0.15, 0.17))
+                  mesh_box(self, p + Vector3(-0.77, 1.8, 0), Vector3(0.04, 3.2, 1.6), Color(0.45, 0.65, 0.75, 0.35))
+              solid_box(self, Vector3(-10, 1.1, 10), Vector3(4, 2.2, 3), Color(0.23, 0.18, 0.14))
+              solid_box(self, Vector3(11.9, 1.2, 9.6), Vector3(1.0, 2.4, 1.6), Color(0.35, 0.24, 0.14))
+              mesh_box(self, Vector3(-12.75, 1.6, 2.0), Vector3(0.15, 0.9, 0.7), Color(0.3, 0.3, 0.32))
+              label3d("KONTEYNER (çöp)", Vector3(-10, 2.7, 8.6))
+              label3d("DOLAP", Vector3(11.9, 2.7, 9.6))
+              label3d("SİGORTA", Vector3(-12.4, 2.4, 2.0))
+              for i in range(SPILLS.size()):
+                  var m := mesh_box(self, SPILLS[i], Vector3(1.2, 0.03, 1.2), Color(0.3, 0.75, 0.9, 0.55))
+                  m.visible = false
+                  spill_nodes.append(m)
+                  spill_on.append(false)
+              for x in [-9.0, -3.0, 3.0, 9.0]:
+                  for z in [-8.0, 0.0, 8.0]:
+                      var l := OmniLight3D.new()
+                      l.position = Vector3(x, 6.5, z)
+                      l.light_energy = 1.1
+                      l.omni_range = 11
+                      l.light_color = Color(1.0, 0.83, 0.65)
+                      add_child(l)
+                      lamps.append(l)
+              var env := WorldEnvironment.new()
+              var e := Environment.new()
+              e.background_mode = Environment.BG_COLOR
+              e.background_color = Color(0.02, 0.02, 0.035)
+              e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+              e.ambient_light_color = Color(0.25, 0.23, 0.28)
+              e.ambient_light_energy = 0.35
+              e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+              env.environment = e
+              env_res = e
+              add_child(env)
+
+          func set_power(on: bool) -> void:
+              power = on
+              for l in lamps:
+                  l.visible = on
+              env_res.ambient_light_energy = 0.35 if on else 0.07
+
+          func build_rack(p: Vector3) -> void:
+              solid_box(self, p + Vector3(0, 1.35, 0), Vector3(2.7, 2.7, 0.6), Color(0.2, 0.21, 0.23))
+              var colors := [Color(0.8, 0.18, 0.1), Color(0.2, 0.55, 0.8), Color(0.8, 0.65, 0.1), Color(0.35, 0.7, 0.3)]
+              for level in range(3):
+                  mesh_box(self, p + Vector3(0, 0.35 + level * 0.65, 0.5), Vector3(2.75, 0.08, 0.5), Color(0.42, 0.43, 0.45))
+                  for n in range(9):
+                      mesh_box(self, p + Vector3(-1.15 + n * 0.29, 0.55 + level * 0.65, 0.55), Vector3(0.23, 0.32, 0.25), colors[(n + level) % 4])
+              mesh_box(self, p + Vector3(0, 2.3, 0.5), Vector3(2.75, 0.08, 0.5), Color(0.55, 0.5, 0.3))
+              var slots: Array = []
+              for n in range(RACK_CAP):
+                  var s := mesh_box(self, p + Vector3(-1.0 + n * 0.4, 2.52, 0.55), Vector3(0.28, 0.36, 0.28), colors[n % 4])
+                  s.visible = n < 2
+                  slots.append(s)
+              racks.append({"pos": p, "count": 2, "slots": slots, "cols": colors})
+              rack_exp.append(false)
+
+          func refresh_rack(i: int) -> void:
+              var r: Dictionary = racks[i]
+              for n in range(RACK_CAP):
+                  var s: MeshInstance3D = r.slots[n]
+                  s.visible = n < r.count
+                  var m: StandardMaterial3D = s.material_override
+                  m.albedo_color = EXP_COL if rack_exp[i] else r.cols[n % 4]
+
+          # ---------- actors ----------
+          # Drop a rigged .glb into assets/models/ to replace the box figure.
+          func build_figure(parent: Node3D, model: String, body: Color, skin: Color) -> void:
+              var path := "res://assets/models/%s.glb" % model
+              if ResourceLoader.exists(path):
+                  var inst: Node = load(path).instantiate()
+                  parent.add_child(inst)
+                  return
+              var mon := model == "monster"
+              var legc := body if mon else Color(0.12, 0.13, 0.2)
+              var hair := Color(0.16, 0.1, 0.06)
+              var arm_x := 0.22 if mon else 0.28
+              var alen := 0.95 if mon else 0.62
+              # torso, hips, neck, head
+              if mon:
+                  mesh_cap(parent, Vector3(0, 1.1, 0), 0.13, 0.9, body, Vector3(1.0, 1.0, 0.8))
+                  mesh_sph(parent, Vector3(0, 1.72, 0), 0.13, skin, Vector3(0.8, 1.5, 0.9))
+              else:
+                  mesh_cap(parent, Vector3(0, 1.1, 0), 0.19, 0.7, body, Vector3(1.3, 1.0, 0.8))
+                  mesh_cap(parent, Vector3(0, 0.88, 0), 0.14, 0.3, legc, Vector3(1.3, 1.0, 0.85))
+                  mesh_cap(parent, Vector3(0, 1.43, 0), 0.06, 0.16, skin)
+                  mesh_sph(parent, Vector3(0, 1.62, 0), 0.15, skin, Vector3(0.92, 1.08, 1.0))
+                  mesh_sph(parent, Vector3(0, 1.67, 0.03), 0.155, hair, Vector3(0.95, 1.0, 1.0))
+                  for ex in [-0.055, 0.055]:
+                      mesh_sph(parent, Vector3(ex, 1.63, -0.135), 0.02, Color(0.05, 0.05, 0.06))
+                  mesh_sph(parent, Vector3(0, 1.58, -0.15), 0.025, skin.darkened(0.1))
+              for side in [-1.0, 1.0]:
+                  var sn := "L" if side < 0 else "R"
+                  var leg := Node3D.new()
+                  leg.name = "leg" + sn
+                  leg.position = Vector3(0.11 * side, 0.85, 0)
+                  parent.add_child(leg)
+                  mesh_cap(leg, Vector3(0, -0.4, 0), 0.05 if mon else 0.075, 0.8, legc)
+                  mesh_box(leg, Vector3(0, -0.8, -0.05), Vector3(0.13, 0.08, 0.26), Color(0.05, 0.05, 0.05))
+                  var arm := Node3D.new()
+                  arm.name = "arm" + sn
+                  arm.position = Vector3(arm_x * side, 1.4, 0)
+                  parent.add_child(arm)
+                  mesh_cap(arm, Vector3(0, -alen / 2.0, 0), 0.035 if mon else 0.055, alen, legc if mon else body)
+                  mesh_sph(arm, Vector3(0, -alen, 0), 0.045 if mon else 0.06, skin)
+
+          # Procedural walk cycle, or "walk"/"idle" clips from an imported model.
+          func animate(node: Node3D, moving: bool) -> void:
+              var aps := node.find_children("*", "AnimationPlayer", true, false)
+              if not aps.is_empty():
+                  var ap: AnimationPlayer = aps[0]
+                  var clip := "walk" if moving else "idle"
+                  if ap.has_animation(clip) and ap.current_animation != clip:
+                      ap.play(clip)
+                  return
+              var swing := sin(Time.get_ticks_msec() * 0.008) * 0.6 if moving else 0.0
+              for entry in [["legL", 1.0], ["legR", -1.0], ["armL", -1.0], ["armR", 1.0]]:
+                  var limb := node.get_node_or_null(NodePath(entry[0])) as Node3D
+                  if limb:
+                      limb.rotation.x = swing * entry[1]
+
+          func build_player() -> void:
+              player = CharacterBody3D.new()
+              player.position = SPAWN
+              add_child(player)
+              var col := CollisionShape3D.new()
+              var cap := CapsuleShape3D.new()
+              cap.radius = 0.32
+              cap.height = 1.7
+              col.shape = cap
+              col.position.y = 0.85
+              player.add_child(col)
+              cam = Camera3D.new()
+              cam.position.y = 1.55
+              player.add_child(cam)
+              cam.current = true
+              flashlight = SpotLight3D.new()
+              flashlight.position = Vector3(0.15, -0.1, -0.2)
+              flashlight.light_energy = 3.5
+              flashlight.spot_range = 17
+              flashlight.spot_angle = 34
+              cam.add_child(flashlight)
+              var arms := "res://assets/models/arms.glb"
+              if ResourceLoader.exists(arms):
+                  cam.add_child(load(arms).instantiate())
+              else:
+                  for side in [-1.0, 1.0]:
+                      var a := mesh_box(cam, Vector3(0.3 * side, -0.38, -0.55), Vector3(0.1, 0.1, 0.45), Color(0.65, 0.48, 0.4))
+                      a.rotation.y = -0.15 * side
+
+          func build_items() -> void:
+              for i in range(ITEM_COUNT + TRASH_COUNT):
+                  var trash := i >= ITEM_COUNT
+                  var item := RigidBody3D.new()
+                  item.mass = 0.5
+                  add_child(item)
+                  mesh_box(item, Vector3.ZERO, Vector3(0.4, 0.34, 0.4), Color(0.08, 0.13, 0.09) if trash else Color(0.6, 0.42, 0.22))
+                  if not trash:
+                      mesh_box(item, Vector3(0, 0.175, 0), Vector3(0.08, 0.01, 0.41), Color(0.8, 0.7, 0.45))
+                  var cs := CollisionShape3D.new()
+                  var bs := BoxShape3D.new()
+                  bs.size = Vector3(0.4, 0.34, 0.4)
+                  cs.shape = bs
+                  item.add_child(cs)
+                  item.position = random_floor()
+                  items.append(item)
+                  item_state.append(0)
+
+          func random_floor() -> Vector3:
+              var x: float = CROSS_X[randi() % CROSS_X.size()]
+              return Vector3(x + randf_range(-0.3, 0.3), 0.4, randf_range(-8.0, 6.5))
+
+          func set_item_state(i: int, s: int) -> void:
+              item_state[i] = s
+              var it := items[i]
+              it.visible = s != -1
+              it.freeze = s != 0 or not is_host()
+              it.collision_layer = 1 if s == 0 else 0
+              it.collision_mask = 1 if s == 0 else 0
+
+          func build_customer(i: int) -> void:
+              var n := Node3D.new()
+              n.position = Vector3(-5.75 + i * 5.75, 0, 6.5)
+              add_child(n)
+              build_figure(n, "customer", [Color(0.32, 0.3, 0.45), Color(0.45, 0.25, 0.2), Color(0.2, 0.4, 0.3)][i], Color(0.65, 0.48, 0.4))
+              customers.append({"node": n, "state": "choose", "path": [], "timer": float(i) * 2.0, "rack": 0, "has": false})
+
+          func build_stranger() -> void:
+              var n := Node3D.new()
+              n.position = Vector3(0, 0, 6.5)
+              n.visible = false
+              add_child(n)
+              build_figure(n, "customer", Color(0.78, 0.78, 0.8), Color(0.92, 0.92, 0.92))
+              stranger = {"node": n, "state": "away", "timer": 0.0, "path": [], "done": false}
+
+          func build_monster() -> void:
+              monster = Node3D.new()
+              monster.position = Vector3(-11, 0, -8)
+              add_child(monster)
+              build_figure(monster, "monster", Color(0.03, 0.03, 0.035), Color(0.05, 0.05, 0.06))
+              for x in [-0.08, 0.08]:
+                  var eye := mesh_box(monster, Vector3(x, 1.72, -0.17), Vector3(0.05, 0.035, 0.03), Color(1, 0.05, 0.05))
+                  var m: StandardMaterial3D = eye.material_override
+                  m.emission_enabled = true
+                  m.emission = Color(1, 0, 0)
+              monster.visible = false
+
+          # ---------- audio: real files in assets/audio override the synth ----------
+          func build_audio() -> void:
+              for entry in [["step", 95.0, 0.10], ["scare", 38.0, 0.9], ["cash", 880.0, 0.15], ["stock", 220.0, 0.2], ["ambient", 55.0, 2.0], ["door", 140.0, 0.35], ["crash", 70.0, 0.6], ["phone", 760.0, 0.5], ["mstep", 75.0, 0.12], ["scratch", 1800.0, 0.15], ["whisper", 320.0, 1.0], ["heart", 55.0, 0.6], ["growl", 70.0, 1.0], ["thud", 60.0, 0.3]]:
+                  var key: String = entry[0]
+                  var stream: AudioStream = null
+                  for ext in ["ogg", "wav", "mp3"]:
+                      var path := "res://assets/audio/%s.%s" % [key, ext]
+                      if ResourceLoader.exists(path):
+                          stream = load(path)
+                          break
+                  streams[key] = stream if stream else tone(entry[1], entry[2])
+                  if ["step", "scare", "cash", "stock", "ambient", "heart"].has(key):
+                      var p := AudioStreamPlayer.new()
+                      p.volume_db = -20.0 if key == "ambient" else (-9.0 if key == "heart" else -7.0)
+                      p.stream = streams[key]
+                      add_child(p)
+                      sounds[key] = p
+              sounds["ambient"].finished.connect(func(): sounds["ambient"].play())
+              sounds["ambient"].play()
+
+          func tone(freq: float, duration: float) -> AudioStreamWAV:
+              var rate := 22050
+              var count := int(rate * duration)
+              var bytes := PackedByteArray()
+              bytes.resize(count * 2)
+              for i in range(count):
+                  var t := float(i) / rate
+                  var fade: float = min(1.0, min(t, duration - t) * 30.0)
+                  bytes.encode_s16(i * 2, int((sin(t * TAU * freq) * 0.18 + sin(t * TAU * freq * 0.5) * 0.06) * fade * 32767.0))
+              var wav := AudioStreamWAV.new()
+              wav.format = AudioStreamWAV.FORMAT_16_BITS
+              wav.mix_rate = rate
+              wav.data = bytes
+              return wav
+
+          # directional 3D sound at a world position
+          func play3d(key: String, pos: Vector3) -> void:
+              if not streams.has(key):
+                  return
+              var p := AudioStreamPlayer3D.new()
+              p.stream = streams[key]
+              p.position = pos
+              p.unit_size = 4.0
+              p.max_distance = 35.0
+              p.volume_db = 3.0
+              add_child(p)
+              p.finished.connect(p.queue_free)
+              p.play()
+
+          func emit_snd(key: String, pos: Vector3) -> void:
+              fx("snd:" + key, pos)
+              if online():
+                  fx.rpc("snd:" + key, pos)
+
+          # ---------- HUD ----------
+          func ui_button(parent: Node, text: String, pos: Vector2, size: Vector2, action: Callable) -> Button:
+              var b := Button.new()
+              b.text = text
+              b.position = pos
+              b.size = size
+              b.add_theme_font_size_override("font_size", 22)
+              b.focus_mode = Control.FOCUS_NONE
+              b.pressed.connect(action)
+              parent.add_child(b)
+              return b
+
+          func ui_label(parent: Node, text: String, pos: Vector2, size: Vector2, font: int) -> Label:
+              var l := Label.new()
+              l.text = text
+              l.position = pos
+              l.size = size
+              l.add_theme_font_size_override("font_size", font)
+              l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+              l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+              parent.add_child(l)
+              return l
+
+          func panel_btn(p: Control, text: String, y: float, action: Callable) -> Button:
+              return ui_button(p, text, Vector2(70, y), Vector2(360, 58), action)
+
+          func make_panel(size: Vector2) -> Panel:
+              var p := Panel.new()
+              p.size = size
+              p.position = (Vector2(1280, 720) - size) / 2.0
+              p.visible = false
+              hud.add_child(p)
+              panels.append(p)
+              return p
+
+          func make_bar(pos: Vector2) -> ProgressBar:
+              var b := ProgressBar.new()
+              b.position = pos
+              b.size = Vector2(220, 14)
+              b.max_value = 100.0
+              b.value = 100.0
+              b.show_percentage = false
+              b.mouse_filter = Control.MOUSE_FILTER_IGNORE
+              hud.add_child(b)
+              return b
+
+          func build_hud() -> void:
+              hud = CanvasLayer.new()
+              add_child(hud)
+              objective = ui_label(hud, "", Vector2(20, 16), Vector2(420, 150), 20)
+              hint = ui_label(hud, "", Vector2(450, 20), Vector2(560, 100), 22)
+              ui_label(hud, "+", Vector2(632, 344), Vector2(20, 30), 24)
+              ui_label(hud, "PİL", Vector2(20, 176), Vector2(60, 24), 16)
+              ui_label(hud, "KOŞU", Vector2(20, 202), Vector2(60, 24), 16)
+              bat_bar = make_bar(Vector2(85, 182))
+              sta_bar = make_bar(Vector2(85, 208))
+              joy_base = ColorRect.new()
+              joy_base.color = Color(1, 1, 1, 0.12)
+              joy_base.size = Vector2(180, 180)
+              joy_base.position = Vector2(180, 440)
+              joy_base.mouse_filter = Control.MOUSE_FILTER_IGNORE
+              hud.add_child(joy_base)
+              dark = ColorRect.new()
+              dark.size = Vector2(1280, 720)
+              dark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+              dark.visible = false
+              hud.add_child(dark)
+              var defs := [["AL/BIRAK", interact_action], ["RAFA DİZ", stock_action], ["KASA", checkout_action],
+                  ["GÖREV", task_action], ["SAKLAN", hide_action], ["FENER", toggle_lamp],
+                  ["KOŞ", toggle_run], ["KAMERA", toggle_cctv], ["KONUŞ", toggle_voice],
+                  ["REPLAY", toggle_replay], ["ONLINE", toggle_net], ["SHOP", toggle_shop]]
+              for i in range(defs.size()):
+                  var b := ui_button(hud, defs[i][0], Vector2(850 + (i % 3) * 140, 410 + (i / 3) * 64), Vector2(130, 58), defs[i][1])
+                  b.add_theme_font_size_override("font_size", 19)
+                  action_buttons.append(b)
+              action_buttons.append(ui_button(hud, "MENÜ", Vector2(1140, 16), Vector2(120, 56), menu_btn))
+              build_menu()
+              build_settings()
+              build_ach()
+              build_help()
+              build_shop_panel()
+              build_net_panel()
+              build_cctv()
+              build_sum_over()
+
+          func build_menu() -> void:
+              menu_panel = make_panel(Vector2(500, 540))
+              menu_title = ui_label(menu_panel, "", Vector2(30, 14), Vector2(440, 80), 26)
+              menu_play = panel_btn(menu_panel, "OYNA", 100, menu_start)
+              panel_btn(menu_panel, "AYARLAR", 166, func(): open_panel(set_panel))
+              panel_btn(menu_panel, "BAŞARIM / NOTLAR", 232, open_ach)
+              menu_outfit = panel_btn(menu_panel, "", 298, cycle_outfit)
+              panel_btn(menu_panel, "ONLINE (Wi-Fi / internet)", 364, func(): open_panel(net_panel))
+              panel_btn(menu_panel, "NASIL OYNANIR", 430, func(): open_panel(help_panel))
+
+          func build_settings() -> void:
+              set_panel = make_panel(Vector2(500, 420))
+              ui_label(set_panel, "AYARLAR", Vector2(30, 14), Vector2(440, 40), 28)
+              ui_label(set_panel, "Ses", Vector2(70, 66), Vector2(300, 30), 22)
+              var s1 := HSlider.new()
+              s1.position = Vector2(70, 100)
+              s1.size = Vector2(360, 30)
+              s1.min_value = 0.0
+              s1.max_value = 1.0
+              s1.step = 0.05
+              s1.value = cfg_vol
+              s1.value_changed.connect(set_vol)
+              set_panel.add_child(s1)
+              ui_label(set_panel, "Kamera hassasiyeti", Vector2(70, 146), Vector2(360, 30), 22)
+              var s2 := HSlider.new()
+              s2.position = Vector2(70, 180)
+              s2.size = Vector2(360, 30)
+              s2.min_value = 0.002
+              s2.max_value = 0.009
+              s2.step = 0.0005
+              s2.value = cfg_sens
+              s2.value_changed.connect(set_sens)
+              set_panel.add_child(s2)
+              gfx_btn = panel_btn(set_panel, "", 240, cycle_gfx)
+              panel_btn(set_panel, "GERİ", 320, back)
+
+          func set_vol(v: float) -> void:
+              cfg_vol = v
+              apply_settings()
+              save_game()
+
+          func set_sens(v: float) -> void:
+              cfg_sens = v
+              save_game()
+
+          func cycle_gfx() -> void:
+              cfg_gfx = (cfg_gfx + 1) % 3
+              apply_settings()
+              save_game()
+
+          func build_ach() -> void:
+              ach_panel = make_panel(Vector2(760, 620))
+              var sc := ScrollContainer.new()
+              sc.position = Vector2(30, 20)
+              sc.size = Vector2(700, 460)
+              ach_panel.add_child(sc)
+              ach_label = Label.new()
+              ach_label.custom_minimum_size = Vector2(680, 0)
+              ach_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+              ach_label.add_theme_font_size_override("font_size", 19)
+              sc.add_child(ach_label)
+              ui_button(ach_panel, "REPLAY KAYDET (son 60 sn)", Vector2(60, 495), Vector2(300, 60), save_replay)
+              ui_button(ach_panel, "GERİ", Vector2(400, 495), Vector2(300, 60), back)
+
+          func open_ach() -> void:
+              var t := "BAŞARIMLAR\n"
+              for k in ACH:
+                  t += ("[x] " if ach.has(k) else "[ ] ") + str(ACH[k]) + "\n"
+              t += "\nHİKÂYE NOTLARI\n"
+              for i in range(NOTES.size()):
+                  t += (str(NOTES[i]) if notes_found.has(i) else "Not %d: ???" % (i + 1)) + "\n"
+              t += "\nSONLAR\n"
+              for i in range(ENDINGS.size()):
+                  t += (str(ENDINGS[i]) if endings.has(i) else "???") + "\n"
+              ach_label.text = t
+              open_panel(ach_panel)
+
+          func build_help() -> void:
+              help_panel = make_panel(Vector2(860, 560))
+              ui_label(help_panel, "KAOS MARKET: NIGHT SHIFT\n\nVardiya 23:00 - 06:00. Sol: joystick, sağ: bakış.\nAL/BIRAK: koli ve çöp al, düşen arkadaşı kaldır.\nRAFA DİZ: raf önünde koli diz; çöpü konteynere (sol arka) at.\nKASA: ödeme al. GÖREV: leke sil, sigorta onar, bozuk (yeşil) ürünü at, telefonu aç.\nSAKLAN: dolap (sağ arka) veya kasa altı. FENER pili kullandıkça biter, kapalıyken dolar.\nKAMERA: güvenlik kameraları. KONUŞ: online sesli sohbet.\n\nKURAL: 03:00'te gelen müşteriye satış yapma!\nGölge ışıktan kaçar. Sürüngen hızlıdır, saklan. Fısıldayan sadece yakındayken görünür, sesini dinle.", Vector2(30, 20), Vector2(800, 430), 21)
+              ui_button(help_panel, "KAPAT", Vector2(310, 480), Vector2(240, 55), back)
+
+          func build_shop_panel() -> void:
+              shop_panel = make_panel(Vector2(500, 430))
+              ui_label(shop_panel, "SHOP (ortak para)", Vector2(30, 15), Vector2(440, 40), 26)
+              var y := 70
+              for d in [["speed", "Hızlı ayakkabı"], ["light", "Güçlü fener"], ["price", "Satış primi +$4"], ["delivery", "Yeni koli teslimatı"]]:
+                  var key: String = d[0]
+                  ui_button(shop_panel, "%s  $%d" % [d[1], PRICES[key]], Vector2(50, y), Vector2(400, 65), func(): send_action("buy", key))
+                  y += 75
+              ui_button(shop_panel, "KAPAT", Vector2(150, 375), Vector2(200, 45), back)
+
+          func build_net_panel() -> void:
+              net_panel = make_panel(Vector2(580, 440))
+              net_info = ui_label(net_panel, "", Vector2(30, 15), Vector2(520, 120), 20)
+              var ips: Array = []
+              for a in IP.get_local_addresses():
+                  if a.begins_with("192.168.") or a.begins_with("10."):
+                      ips.append(a)
+              net_info.text = "Aynı Wi-Fi: bu cihaz %s\nİnternet: SUNUCU KUR UPnP ile port açmayı dener (UDP %d); olmazsa router'da yönlendir." % [", ".join(PackedStringArray(ips)), PORT]
+              ip_edit = LineEdit.new()
+              ip_edit.placeholder_text = "Sunucu IP / alan adı"
+              ip_edit.position = Vector2(90, 150)
+              ip_edit.size = Vector2(400, 55)
+              net_panel.add_child(ip_edit)
+              ui_button(net_panel, "SUNUCU KUR", Vector2(90, 225), Vector2(190, 65), host_game)
+              ui_button(net_panel, "KATIL", Vector2(300, 225), Vector2(190, 65), join_game)
+              ui_button(net_panel, "BAĞLANTIYI KES", Vector2(90, 310), Vector2(190, 60), func(): go_offline("Çevrimdışı"))
+              ui_button(net_panel, "KAPAT", Vector2(300, 310), Vector2(190, 60), back)
+
+          func build_cctv() -> void:
+              cctv_panel = make_panel(Vector2(660, 470))
+              cctv_title = ui_label(cctv_panel, "KAMERA 1 - SALON", Vector2(30, 10), Vector2(560, 36), 22)
+              var svc := SubViewportContainer.new()
+              svc.stretch = true
+              svc.position = Vector2(30, 52)
+              svc.size = Vector2(600, 338)
+              cctv_panel.add_child(svc)
+              var sv := SubViewport.new()
+              sv.size = Vector2i(600, 338)
+              svc.add_child(sv)
+              for d in [[Vector3(-12, 7, 12), Vector3(2, 0, -2)], [Vector3(12, 7, -12), Vector3(-2, 0, 2)]]:
+                  var c := Camera3D.new()
+                  sv.add_child(c)
+                  c.look_at_from_position(d[0], d[1])
+                  cctv_cams.append(c)
+              cctv_cams[0].current = true
+              ui_button(cctv_panel, "KAMERA DEĞİŞTİR", Vector2(40, 405), Vector2(270, 52), switch_cam)
+              ui_button(cctv_panel, "KAPAT", Vector2(350, 405), Vector2(270, 52), back)
+
+          func switch_cam() -> void:
+              cctv_idx = 1 - cctv_idx
+              cctv_cams[cctv_idx].current = true
+              cctv_title.text = "KAMERA 1 - SALON" if cctv_idx == 0 else "KAMERA 2 - KASA"
+
+          func build_sum_over() -> void:
+              sum_panel = make_panel(Vector2(700, 560))
+              sum_label = ui_label(sum_panel, "", Vector2(30, 20), Vector2(640, 430), 20)
+              ui_button(sum_panel, "SONRAKİ GECE", Vector2(210, 480), Vector2(280, 55), next_night)
+              over_panel = make_panel(Vector2(560, 380))
+              over_label = ui_label(over_panel, "", Vector2(30, 20), Vector2(500, 250), 24)
+              ui_button(over_panel, "TEKRAR DENE", Vector2(40, 295), Vector2(230, 60), retry_night)
+              ui_button(over_panel, "ANA MENÜ", Vector2(290, 295), Vector2(230, 60), to_menu)
+
+          # ---------- panels / menu flow ----------
+          func close_panels() -> void:
+              for p in panels:
+                  p.visible = false
+
+          func any_panel() -> bool:
+              for p in panels:
+                  if p.visible:
+                      return true
+              return false
+
+          func open_panel(p: Panel) -> void:
+              close_panels()
+              p.visible = true
+
+          func back() -> void:
+              close_panels()
+              if mode == "menu":
+                  open_menu()
+
+          func hud_panel(p: Panel) -> void:
+              if mode != "play":
+                  return
+              var opening := not p.visible
+              close_panels()
+              p.visible = opening
+
+          func toggle_shop() -> void:
+              hud_panel(shop_panel)
+
+          func toggle_net() -> void:
+              hud_panel(net_panel)
+
+          func toggle_cctv() -> void:
+              hud_panel(cctv_panel)
+
+          func open_menu() -> void:
+              if mode == "sum" or mode == "over":
+                  return
+              close_panels()
+              mode = "menu"
+              menu_title.text = "KAOS MARKET\nGece %d   Para: $%d" % [night, int(money)]
+              menu_play.text = "DEVAM" if in_run else "OYNA (Gece %d)" % night
+              menu_outfit.text = "KIYAFET: " + str(OUTFIT_NAMES[outfit])
+              menu_panel.visible = true
+
+          func menu_btn() -> void:
+              if mode == "play":
+                  open_menu()
+              elif mode == "menu" and in_run:
+                  menu_start()
+
+          func menu_start() -> void:
+              close_panels()
+              if not in_run:
+                  in_run = true
+                  if is_host():
+                      start_night()
+              mode = "play"
+
+          func cycle_outfit() -> void:
+              var i := unlocked.find(outfit)
+              outfit = int(unlocked[(i + 1) % unlocked.size()])
+              menu_outfit.text = "KIYAFET: " + str(OUTFIT_NAMES[outfit])
+              save_game()
+
+          func next_night() -> void:
+              if is_host():
+                  start_night()
+              else:
+                  status("Sunucu yeni geceyi başlatacak")
+
+          func retry_night() -> void:
+              next_night()
+
+          func to_menu() -> void:
+              in_run = false
+              if online():
+                  go_offline("Çevrimdışı")
+              mode = "menu"
+              open_menu()
+
+          func update_objective() -> void:
+              var minutes := int(23 * 60 + clock_min())
+              var role := "TEK" if not online() else ("SUNUCU" if multiplayer.is_server() else "İSTEMCİ")
+              var t := "GECE %d [%s]\nSaat: %02d:%02d\nPara: $%d  Satış: %d\nRafa dizilen: %d" % [night, role, (minutes / 60) % 24, minutes % 60, int(money), sales, stocked]
+              if not power:
+                  t += "\nELEKTRİK YOK!"
+              if ext_ip != "" and online():
+                  t += "\nIP: " + ext_ip
+              objective.text = t
+              bat_bar.value = battery
+              sta_bar.value = stamina
+              dark.visible = hidden_in >= 0 or is_down()
+              dark.color = Color(0.4, 0, 0, 0.6) if is_down() else Color(0, 0, 0, 0.72)
+
+          func toggle_run() -> void:
+              if stamina < 15.0 and not is_running:
+                  status("Nefes nefesesin")
+                  return
+              is_running = not is_running
+              status("Koşma: Açık" if is_running else "Koşma: Kapalı")
+
+          func toggle_lamp() -> void:
+              if not light_on and battery < 5.0:
+                  status("Fener pili boş, kapalıyken dolar")
+                  return
+              light_on = not light_on
+              flashlight.visible = light_on
+
+          # ---------- input ----------
+          func over_ui(pos: Vector2) -> bool:
+              if any_panel():
+                  return true
+              for b in action_buttons:
+                  if b.get_global_rect().has_point(pos):
+                      return true
+              return false
+
+          func _input(event: InputEvent) -> void:
+              if event is InputEventScreenTouch:
+                  if event.pressed:
+                      if over_ui(event.position):
+                          # extra fingers do not emulate a mouse, so press buttons by hand
+                          if event.index > 0 and not any_panel():
+                              for b in action_buttons:
+                                  if b.get_global_rect().has_point(event.position):
+                                      b.pressed.emit()
+                          return
+                      if event.position.x < 576.0 and move_touch == -1:
+                          move_touch = event.index
+                          move_origin = event.position
+                          joy_base.position = move_origin - joy_base.size / 2.0
+                      elif look_touch == -1:
+                          look_touch = event.index
+                  else:
+                      if event.index == move_touch:
+                          move_touch = -1
+                          touch_move = Vector2.ZERO
+                      if event.index == look_touch:
+                          look_touch = -1
+              elif event is InputEventScreenDrag:
+                  if event.index == move_touch:
+                      touch_move = (event.position - move_origin).limit_length(90.0) / 90.0
+                  elif event.index == look_touch:
+                      look(event.relative)
+              elif event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+                  look(event.relative)
+
+          func look(d: Vector2) -> void:
+              yaw -= d.x * cfg_sens
+              pitch = clamp(pitch - d.y * cfg_sens, -1.2, 1.2)
+              player.rotation.y = yaw
+              cam.rotation.x = pitch
+
+          # ---------- main loop ----------
+          func _process(delta: float) -> void:
+              var k := minf(1.0, delta * 14.0)
+              # heartbeat speeds up as the creature gets closer
+              if mode == "play" and monster != null and player != null and sounds.has("heart"):
+                  var hd := player.position.distance_to(monster.position)
+                  if hd < 14.0:
+                      heart_t -= delta
+                      if heart_t <= 0.0:
+                          sounds["heart"].play()
+                          heart_t = remap(clampf(hd, 2.0, 14.0), 2.0, 14.0, 0.5, 1.2)
+              for n in tgt.keys():
+                  if not is_instance_valid(n):
+                      tgt.erase(n)
+                      continue
+                  var t: Array = tgt[n]
+                  n.position = n.position.lerp(t[0], k)
+                  if t[1] != null:
+                      n.rotation.y = lerp_angle(n.rotation.y, float(t[1]), k)
+
+          func set_tgt(n: Node3D, p: Vector3, y: Variant = null) -> void:
+              if not tgt.has(n) or n.position.distance_to(p) > 4.0:
+                  n.position = p
+                  if y != null:
+                      n.rotation.y = float(y)
+              tgt[n] = [p, y]
+
+          func sim_stopped() -> bool:
+              return mode == "sum" or mode == "over" or (not online() and mode != "play")
+
+          func _physics_process(delta: float) -> void:
+              if replaying:
+                  play_replay(delta)
+                  if not online():
+                      return
+              if not online() and mode != "play":
+                  return
+              move_player(delta)
+              if is_host():
+                  peers[my_id()] = my_pose()
+                  simulate(delta)
+              net_tick(delta)
+              update_carried()
+              record_tick(delta)
+              update_objective()
+              voice_tick()
+
+          func my_pose() -> Dictionary:
+              return {"pos": player.position, "yaw": yaw, "light": light_on, "outfit": outfit, "hid": hidden_in >= 0, "t": Time.get_ticks_msec() / 1000.0}
+
+          func is_down() -> bool:
+              if is_host():
+                  return down_t.has(my_id())
+              var me: Dictionary = peers.get(my_id(), {})
+              return bool(me.get("down", false))
+
+          func move_player(delta: float) -> void:
+              var v := touch_move
+              if Input.is_key_pressed(KEY_W): v.y -= 1
+              if Input.is_key_pressed(KEY_S): v.y += 1
+              if Input.is_key_pressed(KEY_A): v.x -= 1
+              if Input.is_key_pressed(KEY_D): v.x += 1
+              var down := is_down()
+              if replaying or hidden_in >= 0 or down or mode != "play":
+                  v = Vector2.ZERO
+              var d := player.transform.basis * Vector3(v.x, 0, v.y)
+              d = d.limit_length(1.0)
+              var moving := d.length() > 0.2
+              if is_running and (stamina <= 0.0 or not moving):
+                  if stamina <= 0.0:
+                      is_running = false
+              if is_running and moving:
+                  stamina = maxf(0.0, stamina - 22.0 * delta)
+              else:
+                  stamina = minf(100.0, stamina + 14.0 * delta)
+              var sp: float = (RUN if is_running else WALK) * (1.0 + 0.15 * upgrades.speed)
+              for i in range(spill_on.size()):
+                  if spill_on[i] and player.position.distance_to(SPILLS[i]) < 1.0:
+                      sp *= 0.6
+              player.velocity.x = d.x * sp
+              player.velocity.z = d.z * sp
+              player.velocity.y = 0.0 if player.is_on_floor() else player.velocity.y - 18.0 * delta
+              if hidden_in < 0:
+                  player.move_and_slide()
+              flashlight.light_energy = 3.5 + 2.5 * upgrades.light
+              flashlight.spot_range = 17.0 + 7.0 * upgrades.light
+              if light_on:
+                  battery = maxf(0.0, battery - delta)
+                  if battery <= 0.0:
+                      light_on = false
+                      flashlight.visible = false
+                      status("Fener pili bitti")
+              else:
+                  battery = minf(100.0, battery + 2.5 * delta)
+              var ty := 0.45 if down else (0.75 if hidden_in == 1 else 1.55)
+              cam.position.y = lerpf(cam.position.y, ty, minf(1.0, delta * 8.0))
+              step_timer -= delta
+              if moving and step_timer <= 0:
+                  sounds["step"].play()
+                  step_timer = 0.34 if is_running else 0.52
+
+          func update_carried() -> void:
+              for i in range(items.size()):
+                  var owner_id := item_state[i]
+                  if owner_id <= 0 or not is_host():
+                      continue
+                  if peers.has(owner_id):
+                      var p: Dictionary = peers[owner_id]
+                      items[i].global_position = p.pos + Vector3(0, 1.15, 0) + Vector3(0, 0, -1.0).rotated(Vector3.UP, p.yaw)
+
+          func simulate(delta: float) -> void:
+              if sim_stopped():
+                  return
+              day_clock += delta
+              event_clock += delta
+              if day_clock >= NIGHT_LEN:
+                  end_night()
+                  return
+              for i in range(items.size()):
+                  if item_state[i] == 0 and items[i].position.y < -3:
+                      items[i].position = random_floor()
+              for c in customers:
+                  update_customer(c, delta)
+              update_stranger(delta)
+              update_monster(delta)
+              update_events(delta)
+              for id in down_t.keys():
+                  down_t[id] -= delta
+                  if down_t[id] <= 0.0:
+                      down_t.erase(id)
+                      if peers.has(id):
+                          peers[id]["pos"] = SPAWN
+                          peers[id]["t"] = Time.get_ticks_msec() / 1000.0
+                      if id == my_id():
+                          respawn()
+                      else:
+                          respawn.rpc_id(id)
+
+          # ---------- customer AI ----------
+          func update_customer(c: Dictionary, delta: float) -> void:
+              var n: Node3D = c.node
+              if m_state != "hidden" and c.state != "flee" and n.position.distance_to(monster.position) < 4.0:
+                  c.state = "flee"
+                  c.has = false
+                  c.path = path_to(n.position, Vector3(5.75, 0, 6.5))
+              var speed := 3.2 if c.state == "flee" else 1.4
+              var was: Vector3 = n.position
+              var arrived := follow(n, c.path, speed, delta)
+              animate(n, was.distance_to(n.position) > 0.001)
+              if not arrived:
+                  return
+              c.timer -= delta
+              if c.timer > 0:
+                  return
+              match c.state:
+                  "choose":
+                      c.rack = randi() % racks.size()
+                      c.path = path_to(n.position, racks[c.rack].pos + Vector3(0, 0, 2.5))
+                      c.state = "browse"
+                      c.timer = randf_range(1.5, 4.0)
+                  "browse":
+                      if racks[c.rack].count > 0:
+                          racks[c.rack].count -= 1
+                          if rack_exp[c.rack]:
+                              money = maxf(0.0, money - 10.0)
+                              say_all("Müşteri bozuk ürün aldı! -$10")
+                          refresh_rack(c.rack)
+                          c.has = true
+                          c.state = "pay"
+                          c.path = path_to(n.position, Vector3(-1.2 + customers.find(c) * 1.2, 0, -8.8))
+                          c.timer = 25.0
+                      else:
+                          c.state = "choose"
+                          c.timer = 1.0
+                  "pay":
+                      c.has = false   # patience ran out
+                      leave(c)
+                  "leave", "flee":
+                      c.state = "choose"
+                      c.timer = randf_range(2.0, 6.0)
+
+          func leave(c: Dictionary) -> void:
+              c.state = "leave"
+              c.timer = 0.0
+              c.path = path_to(c.node.position, Vector3(0, 0, 6.5))
+
+          # the 03:00 customer: selling to him breaks the rule
+          func update_stranger(delta: float) -> void:
+              var s: Dictionary = stranger
+              var n: Node3D = s.node
+              if s.state == "away":
+                  if not s.done and clock_min() >= 240.0:
+                      s.done = true
+                      s.state = "come"
+                      s.timer = 45.0
+                      n.position = Vector3(0, 0, 6.5)
+                      n.visible = true
+                      s.path = path_to(n.position, Vector3(2.6, 0, -8.8))
+                      emit_snd("door", Vector3(0, 1, 7.5))
+                  return
+              var was: Vector3 = n.position
+              var arrived := follow(n, s.path, 1.2, delta)
+              animate(n, was.distance_to(n.position) > 0.001)
+              if s.state == "come" and arrived:
+                  s.state = "wait"
+              if s.state == "wait":
+                  s.timer -= delta
+                  if s.timer <= 0.0:
+                      s.state = "leave"
+                      s.path = path_to(n.position, Vector3(0, 0, 6.5))
+                      money += 25.0
+                      say_all("Garip müşteri sessizce çıktı. Kurala uydun +$25")
+                      give("rule")
+              elif s.state == "leave" and arrived:
+                  s.state = "away"
+                  n.visible = false
+
+          func violate(id: int) -> void:
+              broken += 1
+              stranger.state = "leave"
+              stranger.path = path_to(stranger.node.position, Vector3(0, 0, 6.5))
+              money = maxf(0.0, money - 40.0)
+              event_clock = 999.0
+              fx("scare", Vector3.ZERO)
+              if online():
+                  fx.rpc("scare", Vector3.ZERO)
+              say_all("KURALI ÇİĞNEDİN! -$40  Bir şey geliyor...")
+
+          # ---------- creature AI (3 types) ----------
+          func sees(from: Vector3, to: Vector3) -> bool:
+              var q := PhysicsRayQueryParameters3D.create(from + Vector3(0, 1.5, 0), to + Vector3(0, 1.5, 0))
+              q.exclude = [player.get_rid()]
+              return get_world_3d().direct_space_state.intersect_ray(q).is_empty()
+
+          func spawn_monster() -> void:
+              var pool: Array = [0]
+              if night >= 2:
+                  pool.append(1)
+              if night >= 3:
+                  pool.append(2)
+              m_type = int(pool.pick_random())
+              monster.scale = Vector3(1.0, 0.55, 1.2) if m_type == 1 else Vector3.ONE
+              monster.position = Vector3(-11, 0, -8)
+              m_state = "patrol"
+              m_path = []
+              m_timer = 40.0
+              m_step_t = 1.0
+              monster.visible = m_type != 2
+              fx("scare", Vector3.ZERO)
+              if online():
+                  fx.rpc("scare", Vector3.ZERO)
+              say_all(["Işıklar titriyor... markette bir şey var!", "Yerde bir şey sürünüyor...", "Fısıltılar duyuyorsun..."][m_type])
+
+          func update_monster(delta: float) -> void:
+              if m_state == "hidden":
+                  if event_clock > spawn_gap():
+                      spawn_monster()
+                  return
+              m_timer -= delta
+              var seen_id := 0
+              var best := 11.0
+              var lit := false
+              var near_any := false
+              var limit := 3.0 if m_type == 2 else 1.2
+              for id in peers:
+                  if down_t.has(id):
+                      continue
+                  var p: Dictionary = peers[id]
+                  var dist: float = monster.position.distance_to(p.pos)
+                  if dist < 3.0:
+                      near_any = true
+                  var hid: bool = p.get("hid", false)
+                  if not (hid and dist > limit) and dist < best and sees(monster.position, p.pos):
+                      best = dist
+                      seen_id = id
+                  var to_m: Vector3 = (monster.position - p.pos).normalized()
+                  if p.light and dist < 9.0 and Vector3(0, 0, -1).rotated(Vector3.UP, p.yaw).dot(to_m) > 0.9 and sees(monster.position, p.pos):
+                      lit = true
+              m_lit = m_lit + delta if lit else maxf(0.0, m_lit - delta)
+              var need: float = [2.0, 3.5, 1.5][m_type]
+              if m_lit > need or m_timer <= 0:
+                  hide_monster()
+                  return
+              if seen_id != 0:
+                  m_state = "chase"
+                  m_target = peers[seen_id].pos
+                  m_path = path_to(monster.position, m_target) if best > 4.0 else [Vector3(m_target.x, 0, m_target.z)]
+              elif m_path.is_empty():
+                  m_state = "search" if m_state == "chase" else "patrol"
+                  m_path = path_to(monster.position, astar.get_point_position(randi() % astar.get_point_count()))
+              var speed: float = [3.0, 4.3, 2.4][m_type] if m_state == "chase" else [1.6, 2.3, 1.4][m_type]
+              speed *= 1.0 + 0.1 * (night - 1)
+              if not power:
+                  speed *= 1.25
+              if lit:
+                  speed *= 0.35
+              follow(monster, m_path, speed, delta)
+              monster.visible = m_type != 2 or lit or near_any
+              animate(monster, true)
+              m_step_t -= delta
+              if m_step_t <= 0.0:
+                  m_step_t = [0.55, 0.35, 1.8][m_type]
+                  emit_snd(["mstep", "scratch", "whisper"][m_type], monster.position)
+              if seen_id != 0 and best < 1.2:
+                  catch_player(seen_id)
+                  return
+              for c in customers:
+                  if c.node.position.distance_to(monster.position) < 0.8:
+                      fx("ragdoll", c.node.position)
+                      if online():
+                          fx.rpc("ragdoll", c.node.position)
+                      c.node.position = Vector3(0, 0, 6.5)
+                      c.path = []
+                      c.state = "choose"
+                      c.has = false
+                      c.timer = 8.0
+
+          func hide_monster() -> void:
+              m_state = "hidden"
+              monster.visible = false
+              event_clock = 0.0
+              m_lit = 0.0
+
+          func catch_player(id: int) -> void:
+              money = maxf(0.0, money - 20.0)
+              var where: Vector3 = peers[id].pos
+              fx("caught", where)
+              if online():
+                  fx.rpc("caught", where)
+              for i in range(items.size()):
+                  if item_state[i] == id:
+                      set_item_state(i, 0)
+              hide_monster()
+              if not online():
+                  game_over("Yaratık seni yakaladı.")
+                  return
+              down_t[id] = 30.0
+              tell(id, "Yere düştün! Arkadaşın AL/BIRAK ile kaldırabilir.")
+              for pid in peers:
+                  if not down_t.has(pid):
+                      return
+              game_over("Herkes yere düştü.")
+
+          @rpc("authority", "call_remote", "reliable")
+          func respawn() -> void:
+              player.position = SPAWN
+              hidden_in = -1
+              status("Ayağa kalktın")
+
+          @rpc("authority", "call_remote", "reliable")
+          func reset_local(msg: String) -> void:
+              player.position = SPAWN
+              hidden_in = -1
+              battery = 100.0
+              stamina = 100.0
+              mode = "play"
+              in_run = true
+              sum_panel.visible = false
+              over_panel.visible = false
+              status(msg)
+
+          @rpc("authority", "call_remote", "reliable")
+          func rpc_sum(txt: String) -> void:
+              show_sum(txt)
+
+          @rpc("authority", "call_remote", "reliable")
+          func rpc_over(txt: String) -> void:
+              show_over(txt)
+
+          @rpc("authority", "call_remote", "reliable")
+          func fx(kind: String, where: Vector3) -> void:
+              match kind:
+                  "scare":
+                      sounds["scare"].play()
+                      play3d("growl", where)
+                      if power:
+                          var tw := create_tween()
+                          for i in range(6):
+                              for l in lamps:
+                                  tw.parallel().tween_property(l, "light_energy", 0.05 if i % 2 == 0 else 0.9, 0.12)
+                              tw.tween_interval(0.05)
+                  "caught", "ragdoll":
+                      sounds["scare"].play()
+                      play3d("growl", where)
+                      spawn_ragdoll(where)
+                  "cash":
+                      sounds["cash"].play()
+                  "stock":
+                      sounds["stock"].play()
+                      stock_animation(where)
+                  _:
+                      if kind.begins_with("snd:"):
+                          play3d(kind.substr(4), where)
+
+          # ---------- night flow ----------
+          func start_night() -> void:
+              day_clock = 0.0
+              event_clock = 0.0
+              rand_timer = 20.0
+              power_timer = randf_range(70.0, 120.0)
+              phone_t = 0.0
+              trash_timer = 40.0
+              exp_timer = 40.0
+              fuse_taps = 0
+              note_shown = false
+              hide_monster()
+              set_power(true)
+              spill_on.fill(false)
+              for m in spill_nodes:
+                  m.visible = false
+              rack_exp.fill(false)
+              for i in range(racks.size()):
+                  racks[i].count = 2
+                  refresh_rack(i)
+              for i in range(items.size()):
+                  items[i].position = random_floor()
+                  items[i].linear_velocity = Vector3.ZERO
+                  set_item_state(i, 0)
+              for c in customers:
+                  c.node.position = Vector3(0, 0, 6.5)
+                  c.path = []
+                  c.state = "choose"
+                  c.has = false
+                  c.timer = randf_range(1.0, 5.0)
+              stranger.state = "away"
+              stranger.done = false
+              stranger.node.visible = false
+              down_t.clear()
+              night_money0 = money
+              night_sales0 = sales
+              close_panels()
+              reset_local("Gece %d başladı. Rafları diz, müşterilere bak." % night)
+              if online():
+                  reset_local.rpc("Gece %d başladı" % night)
+
+          func end_night() -> void:
+              var earned := int(money - night_money0)
+              var fined := 0
+              for i in range(spill_on.size()):
+                  if spill_on[i]:
+                      fined += 5
+              for e in rack_exp:
+                  if e:
+                      fined += 15
+              money = maxf(0.0, money - fined)
+              var txt := "VARDİYA BİTTİ - 06:00\nGece %d\nSatış: %d\nKazanç: $%d\nCezalar (leke / bozuk ürün): -$%d\nToplam para: $%d" % [night, sales - night_sales0, earned, fined, int(money)]
+              if night - 1 < NOTES.size() and not notes_found.has(night - 1):
+                  notes_found.append(night - 1)
+                  txt += "\n\nYeni not bulundu:\n" + str(NOTES[night - 1])
+              if night == 1:
+                  unlock(1)
+                  give("night1")
+              if night == 3:
+                  unlock(2)
+                  give("night3")
+              if night == 5:
+                  var e_id := 0 if broken == 0 else (2 if notes_found.size() >= 5 else 1)
+                  if not endings.has(e_id):
+                      endings.append(e_id)
+                  unlock(3)
+                  txt += "\n\n" + str(ENDINGS[e_id])
+                  give("ending")
+              night += 1
+              save_game()
+              show_sum(txt)
+              if online():
+                  rpc_sum.rpc(txt)
+
+          func show_sum(txt: String) -> void:
+              close_panels()
+              mode = "sum"
+              sum_label.text = txt
+              sum_panel.visible = true
+
+          func show_over(txt: String) -> void:
+              close_panels()
+              mode = "over"
+              over_label.text = txt
+              over_panel.visible = true
+
+          func game_over(reason: String) -> void:
+              var loss := int(money * 0.25)
+              money -= loss
+              save_game()
+              var txt := "GAME OVER\n%s\n\nPara cezası: -$%d\nKalan para: $%d\nGece %d yeniden denenecek." % [reason, loss, int(money), night]
+              show_over(txt)
+              if online():
+                  rpc_over.rpc(txt)
+
+          # ---------- random events, blackout, phone ----------
+          func update_events(delta: float) -> void:
+              rand_timer -= delta
+              if rand_timer <= 0.0:
+                  rand_timer = randf_range(22.0, 45.0)
+                  random_event()
+              power_timer -= delta
+              if power and power_timer <= 0.0:
+                  set_power(false)
+                  fuse_taps = 0
+                  power_timer = randf_range(80.0, 140.0) / (1.0 + 0.15 * night)
+                  say_all("ELEKTRİK KESİLDİ! Sigorta kutusunu onar (sol duvar, GÖREV x4).")
+                  event_clock = maxf(event_clock, spawn_gap() - 6.0)
+              phone_t = maxf(0.0, phone_t - delta)
+              exp_timer -= delta
+              if exp_timer <= 0.0:
+                  exp_timer = randf_range(35.0, 60.0)
+                  var r := randi() % racks.size()
+                  rack_exp[r] = true
+                  refresh_rack(r)
+              trash_timer -= delta
+              if trash_timer <= 0.0:
+                  trash_timer = 45.0
+                  for i in range(ITEM_COUNT, items.size()):
+                      if item_state[i] == -1:
+                          items[i].position = random_floor()
+                          set_item_state(i, 0)
+                          break
+              if not note_shown and clock_min() >= 210.0:
+                  note_shown = true
+                  say_all("NOT: 03:00'te gelene satış yapma.")
+
+          func add_spill_near(p: Vector3) -> void:
+              var best := -1
+              var bd := 9999.0
+              for i in range(SPILLS.size()):
+                  if not spill_on[i]:
+                      var d := p.distance_to(SPILLS[i])
+                      if d < bd:
+                          bd = d
+                          best = i
+              if best >= 0:
+                  spill_on[best] = true
+                  spill_nodes[best].visible = true
+
+          func random_event() -> void:
+              match randi() % 4:
+                  0:
+                      var r := randi() % racks.size()
+                      racks[r].count = max(0, racks[r].count - 3)
+                      refresh_rack(r)
+                      var p: Vector3 = racks[r].pos
+                      emit_snd("crash", p + Vector3(0, 1, 0))
+                      add_spill_near(p)
+                      say_all("Bir raf devrildi!")
+                  1:
+                      emit_snd("door", Vector3(randf_range(-10, 10), 1.0, randf_range(-8, 10)))
+                      say_all("Bir kapı kendi kendine açıldı...")
+                  2:
+                      phone_t = 12.0
+                      for k in range(3):
+                          get_tree().create_timer(1.2 * k).timeout.connect(emit_snd.bind("phone", CHECKOUT + Vector3(0, 1.2, 0)))
+                      say_all("Kasada telefon çalıyor...")
+                  3:
+                      add_spill_near(random_floor())
+                      say_all("Yerde bir şey döküldü.")
+
+          func unlock_note() -> void:
+              var pool: Array = []
+              for i in range(NOTES.size()):
+                  if not notes_found.has(i):
+                      pool.append(i)
+              if pool.is_empty():
+                  return
+              var i: int = int(pool.pick_random())
+              notes_found.append(i)
+              say_all("Telefonda biri not bıraktı:\n" + str(NOTES[i]))
+              save_game()
+
+          # ---------- ragdoll ----------
+          func rb_cap(root: Node3D, pos: Vector3, r: float, h: float, color: Color) -> RigidBody3D:
+              var b := RigidBody3D.new()
+              b.position = pos
+              b.mass = 0.6
+              b.linear_damp = 0.5
+              b.angular_damp = 3.0
+              b.can_sleep = true
+              b.continuous_cd = true
+              var pm := PhysicsMaterial.new()
+              pm.friction = 0.9
+              pm.bounce = 0.05
+              b.physics_material_override = pm
+              b.collision_layer = 2
+              b.collision_mask = 1
+              root.add_child(b)
+              mesh_cap(b, Vector3.ZERO, r, h, color)
+              var cs := CollisionShape3D.new()
+              var cp := CapsuleShape3D.new()
+              cp.radius = r
+              cp.height = maxf(h, r * 2.0)
+              cs.shape = cp
+              b.add_child(cs)
+              return b
+
+          func rag_joint(root: Node3D, a: Node3D, b: Node3D, pos: Vector3, hinge: bool) -> void:
+              var j: Joint3D
+              if hinge:
+                  j = HingeJoint3D.new()
+                  j.rotation.y = PI / 2.0
+                  j.set("angular_limit/enable", true)
+                  j.set("angular_limit/lower", deg_to_rad(-125.0))
+                  j.set("angular_limit/upper", deg_to_rad(8.0))
+              else:
+                  j = ConeTwistJoint3D.new()
+                  j.set("swing_span", deg_to_rad(50.0))
+                  j.set("twist_span", deg_to_rad(35.0))
+              j.position = pos
+              root.add_child(j)
+              j.node_a = j.get_path_to(a)
+              j.node_b = j.get_path_to(b)
+
+          # skeletal ragdoll: capsule bones, cone-twist shoulders/hips/neck, hinge elbows/knees
+          func spawn_ragdoll(where: Vector3) -> void:
+              var root := Node3D.new()
+              root.position = Vector3(where.x, 0, where.z)
+              add_child(root)
+              var cloth := Color(0.35, 0.3, 0.45)
+              var skin := Color(0.65, 0.48, 0.4)
+              var pants := Color(0.12, 0.13, 0.2)
+              var torso := rb_cap(root, Vector3(0, 1.1, 0), 0.19, 0.7, cloth)
+              var head := rb_cap(root, Vector3(0, 1.68, 0), 0.14, 0.3, skin)
+              rag_joint(root, torso, head, Vector3(0, 1.5, 0), false)
+              for side in [-1.0, 1.0]:
+                  var ua := rb_cap(root, Vector3(0.34 * side, 1.2, 0), 0.06, 0.34, cloth)
+                  var la := rb_cap(root, Vector3(0.34 * side, 0.88, 0), 0.05, 0.32, skin)
+                  var th := rb_cap(root, Vector3(0.12 * side, 0.62, 0), 0.08, 0.42, pants)
+                  var sh := rb_cap(root, Vector3(0.12 * side, 0.22, 0), 0.065, 0.42, pants)
+                  rag_joint(root, torso, ua, Vector3(0.3 * side, 1.38, 0), false)
+                  rag_joint(root, ua, la, Vector3(0.34 * side, 1.04, 0), true)
+                  rag_joint(root, torso, th, Vector3(0.12 * side, 0.85, 0), false)
+                  rag_joint(root, th, sh, Vector3(0.12 * side, 0.4, 0), true)
+              var push := Vector3(randf_range(-2, 2), 1.5, randf_range(-2, 2))
+              torso.apply_central_impulse(push)
+              torso.apply_torque_impulse(Vector3(randf_range(-0.6, 0.6), randf_range(-0.4, 0.4), randf_range(-0.6, 0.6)))
+              head.apply_central_impulse(push * 0.4)
+              torso.contact_monitor = true
+              torso.max_contacts_reported = 2
+              var landed := [false]
+              torso.body_entered.connect(func(_b):
+                  if not landed[0]:
+                      landed[0] = true
+                      play3d("thud", torso.global_position))
+              get_tree().create_timer(10.0).timeout.connect(root.queue_free)
+
+          # ---------- actions (host validated) ----------
+          func send_action(kind: String, arg: String = "") -> void:
+              if replaying or mode != "play":
+                  return
+              if is_host():
+                  peers[my_id()] = my_pose()
+                  do_action(my_id(), kind, arg)
+              else:
+                  request_action.rpc_id(1, kind, arg)
+
+          var last_act := {}
+
+          @rpc("any_peer", "call_remote", "reliable")
+          func request_action(kind: String, arg: String) -> void:
+              if not multiplayer.is_server():
+                  return
+              var id := multiplayer.get_remote_sender_id()
+              var now := Time.get_ticks_msec() / 1000.0
+              if now - float(last_act.get(id, 0.0)) < 0.15:
+                  return   # basic anti-spam
+              last_act[id] = now
+              do_action(id, kind, arg)
+
+          func interact_action() -> void:
+              send_action("interact")
+
+          func stock_action() -> void:
+              send_action("stock")
+
+          func checkout_action() -> void:
+              send_action("checkout")
+
+          func task_action() -> void:
+              send_action("task")
+
+          func hide_action() -> void:
+              if mode != "play" or is_down():
+                  return
+              if hidden_in >= 0:
+                  hidden_in = -1
+                  player.position = hide_prev
+                  status("Saklanmaktan çıktın")
+                  return
+              for i in range(HIDES.size()):
+                  if player.position.distance_to(HIDES[i]) < 3.2:
+                      hidden_in = i
+                      hide_prev = player.position
+                      player.position = HIDES[i]
+                      status("Saklandın. Çıkmak için tekrar SAKLAN.")
+                      give("hide")
+                      return
+              status("Yakında saklanma yeri yok (dolap: sağ arka, kasa altı)")
+
+          func tell(id: int, text: String) -> void:
+              if id == my_id():
+                  status(text)
+              else:
+                  receive_status.rpc_id(id, text)
+
+          @rpc("authority", "call_remote", "reliable")
+          func receive_status(text: String) -> void:
+              status(text)
+
+          func do_action(id: int, kind: String, arg: String) -> void:
+              if not peers.has(id) or down_t.has(id):
+                  return
+              var pos: Vector3 = peers[id].pos
+              var held := item_state.find(id)
+              match kind:
+                  "interact":
+                      if held >= 0:
+                          set_item_state(held, 0)
+                          tell(id, "Bırakıldı")
+                          return
+                      for oid in down_t.keys():
+                          if peers.has(oid) and pos.distance_to(peers[oid].pos) < 2.4:
+                              down_t.erase(oid)
+                              tell(oid, "Ayağa kaldırıldın!")
+                              tell(id, "Arkadaşını kaldırdın!")
+                              if id == my_id():
+                                  give("revive")
+                              return
+                      var best := 2.5
+                      var found := -1
+                      for i in range(items.size()):
+                          var d := pos.distance_to(items[i].position)
+                          if item_state[i] == 0 and d < best:
+                              best = d
+                              found = i
+                      if found >= 0:
+                          set_item_state(found, id)
+                          tell(id, "Çöp alındı. Konteynere götür." if found >= ITEM_COUNT else "Koli alındı. Rafa diz veya kasada sat.")
+                      else:
+                          tell(id, "Yakında koli yok")
+                  "stock":
+                      if held < 0:
+                          tell(id, "Önce bir koli veya çöp al")
+                          return
+                      if held >= ITEM_COUNT:
+                          if pos.distance_to(DUMP) < 3.2:
+                              set_item_state(held, -1)
+                              money += 6
+                              tasks_done += 1
+                              fx("cash", pos)
+                              if online():
+                                  fx.rpc("cash", pos)
+                              tell(id, "Çöp atıldı +$6")
+                              if tasks_done >= 10:
+                                  give("clean")
+                          else:
+                              tell(id, "Çöpü konteynere götür (sol arka)")
+                          return
+                      for r in range(racks.size()):
+                          if pos.distance_to(racks[r].pos + Vector3(0, 0, 1.3)) < 2.0 and racks[r].count < RACK_CAP:
+                              var where: Vector3 = racks[r].slots[racks[r].count].position
+                              racks[r].count += 1
+                              set_item_state(held, -1)
+                              stocked += 1
+                              money += 5
+                              fx("stock", where)
+                              if online():
+                                  fx.rpc("stock", where)
+                              get_tree().create_timer(1.3).timeout.connect(refresh_rack.bind(r))
+                              return
+                      tell(id, "Dolu olmayan bir rafın önüne geç")
+                  "checkout":
+                      if pos.distance_to(CHECKOUT) > 4.5:
+                          tell(id, "Kasaya yaklaşmalısın")
+                          return
+                      var gain: float = 12.0 + 4.0 * upgrades.price
+                      var done := false
+                      for c in customers:
+                          if c.state == "pay" and c.has and c.path.is_empty():
+                              c.has = false
+                              leave(c)
+                              done = true
+                              break
+                      if not done and stranger.state == "wait":
+                          violate(id)
+                          return
+                      if not done and held >= ITEM_COUNT:
+                          tell(id, "Çöp satılmaz")
+                          return
+                      if not done and held >= 0:
+                          set_item_state(held, -1)
+                          done = true
+                      if done:
+                          money += gain
+                          sales += 1
+                          total_sales += 1
+                          fx("cash", pos)
+                          if online():
+                              fx.rpc("cash", pos)
+                          tell(id, "Satış: +$%d" % int(gain))
+                          give("first_sale")
+                          if total_sales >= 10:
+                              give("sales10")
+                      else:
+                          tell(id, "Bekleyen müşteri veya elinde koli yok")
+                  "task":
+                      for i in range(SPILLS.size()):
+                          if spill_on[i] and pos.distance_to(SPILLS[i]) < 2.0:
+                              spill_on[i] = false
+                              spill_nodes[i].visible = false
+                              money += 8
+                              tasks_done += 1
+                              fx("cash", pos)
+                              if online():
+                                  fx.rpc("cash", pos)
+                              tell(id, "Zemin silindi +$8")
+                              if tasks_done >= 10:
+                                  give("clean")
+                              return
+                      if not power and pos.distance_to(FUSE) < 2.8:
+                          fuse_taps += 1
+                          if fuse_taps >= 4:
+                              set_power(true)
+                              money += 15
+                              say_all("Elektrik geri geldi! +$15")
+                              give("fix")
+                          else:
+                              tell(id, "Sigorta onarılıyor %d/4" % fuse_taps)
+                          return
+                      if phone_t > 0.0 and pos.distance_to(CHECKOUT) < 4.0:
+                          phone_t = 0.0
+                          event_clock = maxf(event_clock, spawn_gap() - 10.0)
+                          if randf() < 0.6:
+                              unlock_note()
+                          else:
+                              say_all("Ahizeden sadece nefes sesi geliyor...")
+                          return
+                      for r in range(racks.size()):
+                          if pos.distance_to(racks[r].pos + Vector3(0, 0, 1.3)) < 2.0:
+                              if rack_exp[r]:
+                                  rack_exp[r] = false
+                                  racks[r].count = max(0, racks[r].count - 1)
+                                  refresh_rack(r)
+                                  money += 10
+                                  tasks_done += 1
+                                  tell(id, "Son kullanma tarihi geçmiş ürün atıldı +$10")
+                                  if tasks_done >= 10:
+                                      give("clean")
+                              else:
+                                  tell(id, "Bu raftaki tarihler geçerli")
+                              return
+                      tell(id, "Yakında görev yok")
+                  "buy":
+                      if not PRICES.has(arg):
+                          return
+                      if upgrades.has(arg) and upgrades[arg] >= 2:
+                          tell(id, "En üst seviye")
+                      elif money < PRICES[arg]:
+                          tell(id, "Yeterli para yok")
+                      else:
+                          money -= PRICES[arg]
+                          if upgrades.has(arg):
+                              upgrades[arg] += 1
+                          else:
+                              for i in range(ITEM_COUNT):
+                                  if item_state[i] == -1:
+                                      items[i].position = random_floor()
+                                      items[i].linear_velocity = Vector3.ZERO
+                                      set_item_state(i, 0)
+                          tell(id, "Satın alındı")
+                          save_game()
+
+          # ---------- stocking animation: carton opens, product flies to shelf ----------
+          func stock_animation(target: Vector3) -> void:
+              var root := Node3D.new()
+              root.position = target + Vector3(0, -0.6, 0.7)
+              add_child(root)
+              mesh_box(root, Vector3.ZERO, Vector3(0.42, 0.3, 0.42), Color(0.6, 0.42, 0.22))
+              var tw := create_tween()
+              for side in [-1.0, 1.0]:
+                  var hinge := Node3D.new()
+                  hinge.position = Vector3(0.21 * side, 0.16, 0)
+                  root.add_child(hinge)
+                  mesh_box(hinge, Vector3(-0.105 * side, 0, 0), Vector3(0.21, 0.02, 0.42), Color(0.7, 0.52, 0.3))
+                  tw.parallel().tween_property(hinge, "rotation:z", -2.2 * side, 0.4)
+              var product := mesh_box(root, Vector3.ZERO, Vector3(0.26, 0.34, 0.26), Color(0.85, 0.65, 0.15))
+              tw.tween_property(product, "position", Vector3(0, 0.9, 0), 0.4)
+              tw.tween_property(product, "position", target - root.position, 0.4)
+              tw.tween_callback(root.queue_free)
+
+          # ---------- multiplayer (ENet, host authoritative, LAN or internet) ----------
+          func host_game() -> void:
+              go_offline("")
+              var peer := ENetMultiplayerPeer.new()
+              if peer.create_server(PORT, 3) != OK:
+                  status("Sunucu kurulamadı")
+                  return
+              multiplayer.multiplayer_peer = peer
+              peers.clear()
+              for i in range(items.size()):
+                  if item_state[i] > 0:
+                      set_item_state(i, 0)
+              var fresh := not in_run
+              in_run = true
+              close_panels()
+              if fresh:
+                  start_night()
+              mode = "play"
+              ext_ip = ""
+              var up := UPNP.new()
+              if up.discover(1500) == UPNP.UPNP_RESULT_SUCCESS:
+                  var gw := up.get_gateway()
+                  if gw and gw.is_valid_gateway():
+                      up.add_port_mapping(PORT, PORT, "KaosMarket", "UDP", 3600)
+                      ext_ip = up.query_external_address()
+              if ext_ip != "":
+                  status("Sunucu açık. İnternet IP: %s  Port: %d (UDP)" % [ext_ip, PORT])
+              else:
+                  status("Sunucu açık (UPnP yok). İnternet için router'da UDP %d aç. Wi-Fi'da IP yeterli." % PORT)
+
+          func join_game() -> void:
+              var address := ip_edit.text.strip_edges()
+              if address.length() < 4:
+                  status("IP veya alan adı gir")
+                  return
+              go_offline("")
+              var peer := ENetMultiplayerPeer.new()
+              if peer.create_client(address, PORT) != OK:
+                  status("Bağlanılamadı")
+                  return
+              multiplayer.multiplayer_peer = peer
+              in_run = true
+              mode = "play"
+              close_panels()
+              for i in range(items.size()):
+                  items[i].freeze = true
+              status("Bağlanıyor...")
+
+          func go_offline(message: String) -> void:
+              if online():
+                  multiplayer.multiplayer_peer.close()
+              multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
+              peers.clear()
+              down_t.clear()
+              tgt.clear()
+              ext_ip = ""
+              talking = false
+              action_buttons[8].text = "KONUŞ"
+              for id in avatars:
+                  avatars[id].queue_free()
+              avatars.clear()
+              for id in voice_nodes:
+                  voice_nodes[id].queue_free()
+              voice_nodes.clear()
+              voice_pb.clear()
+              for i in range(items.size()):
+                  set_item_state(i, 0 if item_state[i] > 0 else item_state[i])
+              status(message)
+
+          func on_peer_connected(id: int) -> void:
+              status("Oyuncu bağlandı: %d" % id)
+
+          func on_peer_disconnected(id: int) -> void:
+              peers.erase(id)
+              down_t.erase(id)
+              last_act.erase(id)
+              if is_host():
+                  for i in range(items.size()):
+                      if item_state[i] == id:
+                          set_item_state(i, 0)
+              if avatars.has(id):
+                  avatars[id].queue_free()
+                  avatars.erase(id)
+
+          func net_tick(delta: float) -> void:
+              if not online() or multiplayer.multiplayer_peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED:
+                  return
+              net_timer -= delta
+              if net_timer > 0:
+                  return
+              net_timer = 0.066
+              if multiplayer.is_server():
+                  receive_snapshot.rpc(snapshot())
+                  update_avatars()
+              else:
+                  send_pose.rpc_id(1, player.position, yaw, light_on, outfit, hidden_in >= 0)
+
+          # host-side validation: area clamp, teleport / speed-hack rejection
+          @rpc("any_peer", "call_remote", "unreliable_ordered")
+          func send_pose(pos: Vector3, rot: float, lamp_on: bool, oc: int, hid: bool) -> void:
+              if not multiplayer.is_server():
+                  return
+              var id := multiplayer.get_remote_sender_id()
+              var now := Time.get_ticks_msec() / 1000.0
+              var old: Dictionary = peers.get(id, {})
+              pos.x = clampf(pos.x, -12.6, 12.6)
+              pos.z = clampf(pos.z, -12.6, 12.6)
+              pos.y = clampf(pos.y, -0.5, 2.0)
+              if not old.is_empty():
+                  var dt: float = maxf(now - float(old.get("t", now)), 0.016)
+                  if old.pos.distance_to(pos) > 9.0 * dt + 1.5 or down_t.has(id):
+                      return
+              peers[id] = {"pos": pos, "yaw": rot, "light": lamp_on, "outfit": clampi(oc, 0, 3), "hid": hid, "t": now}
+
+          func snapshot() -> Dictionary:
+              var it: Array = []
+              for i in range(items.size()):
+                  it.append([items[i].position, items[i].rotation, item_state[i]])
+              var cu: Array = []
+              for c in customers:
+                  cu.append([c.node.position, c.node.rotation.y])
+              var ra: Array = []
+              for r in racks:
+                  ra.append(r.count)
+              var pl := {}
+              for id in peers:
+                  var d: Dictionary = peers[id].duplicate()
+                  d["down"] = down_t.has(id)
+                  pl[id] = d
+              var sn: Node3D = stranger.node
+              return {"players": pl, "items": it, "customers": cu, "racks": ra, "rexp": rack_exp, "spills": spill_on, "power": power,
+                  "st": [sn.position, sn.rotation.y, sn.visible],
+                  "monster": [monster.position, monster.rotation.y, monster.visible, m_type],
+                  "money": money, "sales": sales, "stocked": stocked, "clock": day_clock, "night": night, "up": upgrades.duplicate()}
+
+          @rpc("authority", "call_remote", "unreliable_ordered")
+          func receive_snapshot(s: Dictionary) -> void:
+              peers = s.players
+              for i in range(items.size()):
+                  var d: Array = s.items[i]
+                  set_item_state(i, d[2])
+                  set_tgt(items[i], d[0])
+                  items[i].rotation = d[1]
+              for i in range(customers.size()):
+                  var n: Node3D = customers[i].node
+                  var p: Vector3 = s.customers[i][0]
+                  animate(n, n.position.distance_to(p) > 0.05)
+                  set_tgt(n, p, s.customers[i][1])
+              var sn: Node3D = stranger.node
+              animate(sn, sn.position.distance_to(s.st[0]) > 0.05)
+              set_tgt(sn, s.st[0], s.st[1])
+              sn.visible = s.st[2]
+              for i in range(racks.size()):
+                  if racks[i].count != s.racks[i] or rack_exp[i] != s.rexp[i]:
+                      racks[i].count = s.racks[i]
+                      rack_exp[i] = s.rexp[i]
+                      refresh_rack(i)
+              for i in range(spill_on.size()):
+                  spill_on[i] = s.spills[i]
+                  spill_nodes[i].visible = s.spills[i]
+              if s.power != power:
+                  set_power(s.power)
+              m_type = s.monster[3]
+              monster.scale = Vector3(1.0, 0.55, 1.2) if m_type == 1 else Vector3.ONE
+              set_tgt(monster, s.monster[0], s.monster[1])
+              monster.visible = s.monster[2]
+              animate(monster, monster.visible)
+              money = s.money
+              sales = s.sales
+              stocked = s.stocked
+              day_clock = s.clock
+              night = s.night
+              upgrades = s.up
+              update_avatars()
+
+          func update_avatars() -> void:
+              for id in peers:
+                  if id == my_id():
+                      continue
+                  var pd: Dictionary = peers[id]
+                  if not avatars.has(id):
+                      var n := Node3D.new()
+                      add_child(n)
+                      build_figure(n, "player", OUTFITS[clampi(int(pd.get("outfit", 0)), 0, 3)], Color(0.65, 0.48, 0.4))
+                      var spot := SpotLight3D.new()
+                      spot.name = "Lamp"
+                      spot.position = Vector3(0, 1.5, -0.3)
+                      spot.light_energy = 3.0
+                      spot.spot_range = 15
+                      n.add_child(spot)
+                      avatars[id] = n
+                  var a: Node3D = avatars[id]
+                  var target: Vector3 = pd.pos
+                  animate(a, a.position.distance_to(target) > 0.05)
+                  set_tgt(a, target, pd.yaw)
+                  a.get_node("Lamp").visible = pd.light
+                  a.visible = not bool(pd.get("hid", false))
+                  a.rotation.x = -1.4 if bool(pd.get("down", false)) else 0.0
+              for id in avatars.keys():
+                  if not peers.has(id):
+                      avatars[id].queue_free()
+                      avatars.erase(id)
+
+          # ---------- voice chat (push to talk, mic -> 12 kHz mono over RPC) ----------
+          func setup_voice() -> void:
+              OS.request_permissions()
+              var idx := AudioServer.bus_count
+              AudioServer.add_bus(idx)
+              AudioServer.set_bus_name(idx, "Mic")
+              capture = AudioEffectCapture.new()
+              AudioServer.add_bus_effect(idx, capture)
+              AudioServer.set_bus_mute(idx, true)
+              mic_player = AudioStreamPlayer.new()
+              mic_player.stream = AudioStreamMicrophone.new()
+              mic_player.bus = "Mic"
+              add_child(mic_player)
+              mic_player.play()
+              voice_ok = true
+
+          func toggle_voice() -> void:
+              if not online():
+                  status("Sesli sohbet sadece online oyunda")
+                  return
+              if not voice_ok:
+                  setup_voice()
+              talking = not talking
+              action_buttons[8].text = "KONUŞ: AÇIK" if talking else "KONUŞ"
+              status("Mikrofon açık" if talking else "Mikrofon kapalı")
+
+          func voice_tick() -> void:
+              if not voice_ok or not talking or not online():
+                  return
+              var frames := capture.get_frames_available()
+              if frames < 600:
+                  return
+              var buf := capture.get_buffer(frames)
+              var ratio := maxi(1, int(AudioServer.get_mix_rate() / VRATE))
+              var count := buf.size() / ratio
+              var out := PackedByteArray()
+              out.resize(count * 2)
+              for i in range(count):
+                  out.encode_s16(i * 2, int(clampf(buf[i * ratio].x, -1.0, 1.0) * 30000.0))
+              if multiplayer.is_server():
+                  relay_voice.rpc(1, out)
+              else:
+                  send_voice.rpc(out)
+
+          @rpc("any_peer", "call_remote", "unreliable")
+          func send_voice(data: PackedByteArray) -> void:
+              if not multiplayer.is_server():
+                  return
+              var sid := multiplayer.get_remote_sender_id()
+              for id in multiplayer.get_peers():
+                  if id != sid:
+                      relay_voice.rpc_id(id, sid, data)
+              play_voice(sid, data)
+
+          @rpc("authority", "call_remote", "unreliable")
+          func relay_voice(sid: int, data: PackedByteArray) -> void:
+              play_voice(sid, data)
+
+          func play_voice(sid: int, data: PackedByteArray) -> void:
+              if not voice_pb.has(sid):
+                  var p := AudioStreamPlayer.new()
+                  var g := AudioStreamGenerator.new()
+                  g.mix_rate = VRATE
+                  g.buffer_length = 0.4
+                  p.stream = g
+                  add_child(p)
+                  p.play()
+                  voice_pb[sid] = p.get_stream_playback()
+                  voice_nodes[sid] = p
+              var pb: AudioStreamGeneratorPlayback = voice_pb[sid]
+              var n := data.size() / 2
+              var arr := PackedVector2Array()
+              arr.resize(n)
+              for i in range(n):
+                  var v := data.decode_s16(i * 2) / 32768.0
+                  arr[i] = Vector2(v, v)
+              if pb.get_frames_available() >= n:
+                  pb.push_buffer(arr)
+
+          # ---------- replay: last 60 s, top-down or first person, can be saved ----------
+          func record_tick(delta: float) -> void:
+              if replaying:
+                  return
+              rec_timer -= delta
+              if rec_timer > 0:
+                  return
+              rec_timer = 0.1
+              var dots: Array = [[player.position, Color(0.2, 0.6, 1.0)]]
+              for id in avatars:
+                  dots.append([avatars[id].position, Color(0.2, 1.0, 1.0)])
+              for c in customers:
+                  dots.append([c.node.position, Color(0.2, 0.9, 0.2)])
+              for i in range(items.size()):
+                  if item_state[i] != -1:
+                      dots.append([items[i].position, Color(0.8, 0.55, 0.2)])
+              if monster.visible:
+                  dots.append([monster.position, Color(1.0, 0.05, 0.05)])
+              record.append({"d": dots, "p": player.position, "y": yaw, "t": pitch})
+              if record.size() > 600:
+                  record.pop_front()
+
+          func toggle_replay() -> void:
+              if replaying:
+                  if not replay_fp:
+                      replay_fp = true
+                      replay_cam.projection = Camera3D.PROJECTION_PERSPECTIVE
+                      replay_cam.fov = 75
+                      status("REPLAY 1. şahıs. Çıkmak için tekrar REPLAY")
+                  else:
+                      stop_replay()
+                  return
+              if record.size() < 20:
+                  status("Henüz yeterli kayıt yok")
+                  return
+              close_panels()
+              replaying = true
+              replay_fp = false
+              replay_index = 0.0
+              replay_root = Node3D.new()
+              add_child(replay_root)
+              replay_cam = Camera3D.new()
+              replay_cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+              replay_cam.size = 28
+              replay_cam.position = Vector3(0, 7.4, 0)
+              replay_cam.rotation.x = -PI / 2
+              replay_root.add_child(replay_cam)
+              replay_cam.current = true
+              status("REPLAY üstten. 1. şahıs için tekrar REPLAY")
+
+          func play_replay(delta: float) -> void:
+              replay_index += delta * 10.0
+              if replay_index >= record.size():
+                  stop_replay()
+                  return
+              var f: Dictionary = record[int(replay_index)]
+              for child in replay_root.get_children():
+                  if child != replay_cam:
+                      child.queue_free()
+              var h := 0.9 if replay_fp else 3.0
+              for d in f.d:
+                  var m := mesh_box(replay_root, Vector3(d[0].x, h, d[0].z), Vector3(0.6, 0.2, 0.6), d[1])
+                  var material: StandardMaterial3D = m.material_override
+                  material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+              if replay_fp:
+                  replay_cam.position = f.p + Vector3(0, 1.55, 0)
+                  replay_cam.rotation = Vector3(f.t, f.y, 0)
+
+          func stop_replay() -> void:
+              replaying = false
+              cam.current = true
+              replay_root.queue_free()
+              status("Oyuna dönüldü")
+
+          func save_replay() -> void:
+              if record.size() < 20:
+                  status("Henüz yeterli kayıt yok")
+                  return
+              var path := "user://replay_%d.dat" % int(Time.get_unix_time_from_system())
+              var f := FileAccess.open(path, FileAccess.WRITE)
+              if f:
+                  f.store_string(var_to_str(record))
+                  f.close()
+                  status("Replay kaydedildi: " + ProjectSettings.globalize_path(path))
+              else:
+                  status("Replay kaydedilemedi")
+          SCRIPT
+      - name: Generate sounds (procedural WAV; your own assets/audio files win)
+        run: |
+          set -eux
+          cd game
+          python3 - <<'PY'
+          import math, random, struct, wave, os
+          R = 22050
+          random.seed(7)
+          def N(sec): return int(R * sec)
+          def save(name, xs):
+              for ext in ('ogg', 'wav', 'mp3'):
+                  if os.path.exists('assets/audio/%s.%s' % (name, ext)):
+                      return
+              os.makedirs('assets/audio', exist_ok=True)
+              w = wave.open('assets/audio/%s.wav' % name, 'wb')
+              w.setnchannels(1); w.setsampwidth(2); w.setframerate(R)
+              w.writeframes(b''.join(struct.pack('<h', int(max(-1.0, min(1.0, v)) * 30000)) for v in xs))
+              w.close()
+          def noise(n): return [random.uniform(-1, 1) for _ in range(n)]
+          def lp(xs, a):
+              out = []; p = 0.0
+              for v in xs:
+                  p += a * (v - p); out.append(p)
+              return out
+          def hp(xs, a): return [v - l for v, l in zip(xs, lp(xs, a))]
+          def sweep(n, f0, f1):
+              out = []; ph = 0.0
+              for i in range(n):
+                  ph += 2 * math.pi * (f0 + (f1 - f0) * i / n) / R
+                  out.append(math.sin(ph))
+              return out
+          def decay(xs, k): return [v * math.exp(-k * i / R) for i, v in enumerate(xs)]
+          def gain(xs, g): return [v * g for v in xs]
+          def mix(*ls):
+              n = max(len(l) for l in ls)
+              return [sum(l[i] if i < len(l) else 0.0 for l in ls) for i in range(n)]
+          def fade(xs, ms=15):
+              out = list(xs); n = min(int(R * ms / 1000), len(out) // 2)
+              for i in range(n):
+                  out[i] *= i / n; out[-1 - i] *= i / n
+              return out
+          def ping(f): return decay(sweep(N(0.5), f, f), 9)
+          save('step', fade(gain(decay(lp(noise(N(0.14)), 0.12), 28), 3.2)))
+          save('mstep', fade(mix(gain(decay(sweep(N(0.25), 70, 40), 14), 0.9), gain(decay(lp(noise(N(0.25)), 0.08), 16), 3.0))))
+          save('stock', fade(mix(gain(decay(sweep(N(0.25), 110, 60), 16), 0.8), gain(decay(lp(noise(N(0.25)), 0.2), 10), 1.8))))
+          save('cash', fade(mix(gain(ping(1568), 0.5), gain([0.0] * N(0.09) + ping(2093), 0.5))))
+          n = N(1.3)
+          dist = [math.tanh(3 * v) for v in sweep(n, 1100, 90)]
+          save('scare', fade(decay(mix(gain(dist, 0.6), gain(hp(noise(n), 0.3), 0.5)), 2.5), 30))
+          n = N(6.0)
+          hum = mix(gain(sweep(n, 50, 50), 0.35), gain(sweep(n, 100, 100), 0.15), gain(sweep(n, 150.5, 150.5), 0.06))
+          wind = [w * (0.6 + 0.4 * math.sin(2 * math.pi * 0.3 * i / R)) * 6.0 for i, w in enumerate(lp(noise(n), 0.01))]
+          save('ambient', fade(mix(gain(hum, 0.5), wind), 300))
+          n = N(1.0); ph = 0.0; creak = []
+          for i in range(n):
+              t = i / R
+              ph += 2 * math.pi * (180 + 60 * math.sin(2 * math.pi * 3 * t) + 100 * t) / R
+              creak.append(((ph / (2 * math.pi)) % 1.0) * 2 - 1)
+          save('door', fade([v * math.sin(math.pi * i / n) * 0.6 for i, v in enumerate(lp(creak, 0.2))], 20))
+          n = N(0.9)
+          save('crash', fade(mix(gain(decay(noise(n), 6), 0.8), gain(decay(sweep(n, 90, 45), 7), 0.8))))
+          n = N(0.5)
+          save('phone', fade([(0.5 + 0.5 * math.sin(2 * math.pi * 20 * i / R)) * (math.sin(2 * math.pi * 440 * i / R) + math.sin(2 * math.pi * 480 * i / R)) * 0.4 for i in range(n)]))
+          n = N(0.45)
+          save('scratch', fade([v * (1.0 if (i * 25 / R) % 1.0 < 0.35 else 0.15) * 0.8 for i, v in enumerate(hp(noise(n), 0.25))]))
+          n = N(1.4); x = noise(n)
+          bp = [a - b for a, b in zip(lp(x, 0.45), lp(x, 0.08))]
+          save('whisper', fade([v * (max(0.0, math.sin(2 * math.pi * 2.2 * i / R)) ** 2) * 2.0 for i, v in enumerate(bp)], 30))
+          n = N(0.7)
+          thump = lambda f0, f1, k: decay(sweep(N(0.3), f0, f1), k)
+          save('heart', fade(mix(gain(thump(62, 38, 22), 1.0), gain([0.0] * N(0.27) + thump(54, 34, 26), 0.75), gain(decay(lp(noise(n), 0.05), 30), 0.4))))
+          n = N(1.2)
+          base = sweep(n, 78, 52)
+          am = [0.55 + 0.45 * math.sin(2 * math.pi * 26 * i / R) for i in range(n)]
+          grr = [math.tanh(2.5 * b * a) for b, a in zip(base, am)]
+          env = [math.sin(math.pi * i / n) ** 0.6 for i in range(n)]
+          save('growl', fade([(g * 0.7 + v * 0.35) * e for g, v, e in zip(grr, lp(noise(n), 0.15), env)], 40))
+          n = N(0.4)
+          save('thud', fade(mix(gain(decay(sweep(n, 95, 35), 16), 1.0), gain(decay(lp(noise(n), 0.1), 24), 1.6))))
+          PY
+      - name: Import project and validate scripts
+        run: |
+          set -euxo pipefail
+          GODOT="$(pwd)/godot-bin/Godot_v4.4.1-stable_linux.x86_64"
+          "$GODOT" --headless --path game --import 2>&1 | tee import.log
+          "$GODOT" --headless --path game --quit-after 120 2>&1 | tee run.log
+          if grep -E "SCRIPT ERROR|Parse Error" import.log run.log; then exit 1; fi
+      - name: Export Android APK
+        run: |
+          set -euxo pipefail
+          GODOT="$(pwd)/godot-bin/Godot_v4.4.1-stable_linux.x86_64"
+          APK="$GITHUB_WORKSPACE/output/KAOS_MARKET_NIGHT_SHIFT.apk"
+          "$GODOT" --headless --path game --export-debug Android "$APK"
+          test -s "$APK"
+          ls -lh "$APK"
+      - name: Release AAB (signed, optional)
+        continue-on-error: true
+        env:
+          KS_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          set -euxo pipefail
+          G=4.4.1
+          GODOT="$(pwd)/godot-bin/Godot_v${G}-stable_linux.x86_64"
+          mkdir -p game/android/build
+          unzip -q -o "$HOME/.local/share/godot/export_templates/${G}.stable/android_source.zip" -d game/android/build
+          echo "${G}.stable" > game/android/.build_version
+          touch game/android/build/.gdignore
+          chmod +x game/android/build/gradlew
+          if [ -n "${KS_B64:-}" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            export GODOT_ANDROID_KEYSTORE_RELEASE_USER="$KS_ALIAS"
+            export GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD="$KS_PASS"
+          else
+            keytool -genkeypair -alias kaosrelease -keyalg RSA -keysize 2048 -validity 10000 -keystore "$RUNNER_TEMP/release.keystore" -storepass kaos-temp-pass -keypass kaos-temp-pass -dname "CN=Kaos Market,O=Kaos,C=TR"
+            export GODOT_ANDROID_KEYSTORE_RELEASE_USER="kaosrelease"
+            export GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD="kaos-temp-pass"
+          fi
+          export GODOT_ANDROID_KEYSTORE_RELEASE_PATH="$RUNNER_TEMP/release.keystore"
+          "$GODOT" --headless --path game --export-release "Android AAB" "$GITHUB_WORKSPACE/output/KAOS_MARKET_NIGHT_SHIFT.aab"
+          test -s "$GITHUB_WORKSPACE/output/KAOS_MARKET_NIGHT_SHIFT.aab"
+      - name: Create feature status report
+        run: |
+          cat > output/FEATURE_STATUS.txt <<'REPORT'
+          EKLENDI (cihazda test edilmedi, CI sadece derleme/script dogrulamasi yapar):
+          - Kayit sistemi (para, yukseltme, gece, basarim, notlar, ayarlar)
+          - Gece dongusu 23:00-06:00, ozet ekrani, zorlasan geceler, 5. gecede son
+          - Ayarlar (ses, kamera hassasiyeti, grafik), ana menu, Game Over
+          - Gorevler: leke silme, cop atma, son kullanma tarihi, elektrik kesintisi + sigorta, telefon
+          - Saklanma (dolap, kasa alti), fener pili, kosma dayanikliligi, guvenlik kameralari
+          - 03:00 kural musterisi, 3 yaratik turu, yonlu 3D sesler, rastgele olaylar
+          - Hikaye notlari, 3 son, kiyafetler, basarimlar
+          - Multiplayer: yerel ag + UPnP ile internet, hareket yumusatma, sunucu tarafli hile korumasi,
+            dusen arkadasi kaldirma, itme-konus sesli sohbet
+          - Replay: ustten + birinci sahis, dosyaya kaydetme (user:// klasoru)
+          - Musteri AI: yol bulma + kacma; AAB (secrets yoksa gecici anahtarla), ikon
+
+          KALANLAR (kod ile cozulemez, varlik/sunucu gerekir):
+          1. Fotogercekci modeller kodla yapilamaz; kapsul/kure insan + yaratik modelleri otomatik uretilir, istersen assets/models/*.glb ile degistir
+          2. Sesler CI'da uretilir (assets/audio/*.wav); kendi .ogg/.wav dosyan varsa o kullanilir
+          3. Ragdoll artik eklemli (kapsul kemikler, hinge/cone-twist); gercek skeleton modeli degil
+          4. Gercek relay/lobi sunucusu (su an dogrudan IP + UPnP), birebir ragdoll senkronu
+          5. Replay'i uygulama disina paylasma (Android share eklentisi gerekir)
+          6. Gercek cihaz testi ve Play Store icin kalici anahtar:
+             KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS secret'larini ekle
+          REPORT
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: KAOS-MARKET-NIGHT-SHIFT
+          path: |
+            output/KAOS_MARKET_NIGHT_SHIFT.apk
+            output/KAOS_MARKET_NIGHT_SHIFT.aab
+            output/FEATURE_STATUS.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+  report:
+    needs: android
+    if: always() && needs.android.result == 'failure'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Publish failure log to ci-logs branch
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          REPO="${{ github.repository }}"
+          JOB_ID=$(gh api "repos/$REPO/actions/runs/${{ github.run_id }}/jobs" --jq '.jobs[] | select(.name=="android") | .id')
+          gh api "repos/$REPO/actions/jobs/$JOB_ID/logs" > full.log || true
+          {
+            echo "run: ${{ github.run_id }}"
+            grep -n -E "##\[error\]|SCRIPT ERROR|Parse Error|ERROR:|Error:|error:|FAILED|xit code" full.log | tail -n 60 || true
+            echo "----- LAST 80 LINES -----"
+            tail -n 80 full.log
+          } | sed 's/\x1b\[[0-9;]*m//g' > ci-log.txt
+          git init -q
+          git checkout -q -b ci-logs
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git add ci-log.txt
+          git commit -q -m "ci log ${{ github.run_id }}"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/$REPO.git" ci-logs
