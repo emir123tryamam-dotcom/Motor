@@ -1,0 +1,1155 @@
+name: Flux Guard APK Build
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Proje dosyalarini olustur
+        run: |
+          mkdir -p app app/src/main app/src/main/java/com/fluxguard/app app/src/main/res/drawable app/src/main/res/mipmap-anydpi-v26 app/src/main/res/values
+          cat > settings.gradle.kts <<'FLUXEOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "FluxGuard"
+          include(":app")
+          FLUXEOF
+          cat > build.gradle.kts <<'FLUXEOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          FLUXEOF
+          cat > gradle.properties <<'FLUXEOF'
+          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          FLUXEOF
+          cat > app/build.gradle.kts <<'FLUXEOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.fluxguard.app"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "com.fluxguard.app"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+              buildFeatures {
+                  compose = true
+              }
+              composeOptions {
+                  kotlinCompilerExtensionVersion = "1.5.14"
+              }
+          }
+
+          dependencies {
+              implementation(platform("androidx.compose:compose-bom:2024.06.00"))
+              implementation("androidx.compose.ui:ui")
+              implementation("androidx.compose.foundation:foundation")
+              implementation("androidx.compose.material3:material3")
+              implementation("androidx.activity:activity-compose:1.9.0")
+              implementation("androidx.core:core-ktx:1.13.1")
+          }
+          FLUXEOF
+          cat > app/src/main/AndroidManifest.xml <<'FLUXEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+              <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+              <uses-permission
+                  android:name="android.permission.READ_EXTERNAL_STORAGE"
+                  android:maxSdkVersion="32" />
+
+              <application
+                  android:allowBackup="false"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="Flux Guard"
+                  android:theme="@style/Theme.FluxGuard">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:screenOrientation="portrait"
+                      android:configChanges="orientation|screenSize|keyboardHidden">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          FLUXEOF
+          cat > app/src/main/res/values/themes.xml <<'FLUXEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="Theme.FluxGuard" parent="android:Theme.Material.NoActionBar">
+                  <item name="android:windowBackground">@color/fg_bg</item>
+                  <item name="android:statusBarColor">@color/fg_bg</item>
+                  <item name="android:navigationBarColor">@color/fg_bg</item>
+              </style>
+          </resources>
+          FLUXEOF
+          cat > app/src/main/res/values/colors.xml <<'FLUXEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="fg_bg">#FF050B18</color>
+          </resources>
+          FLUXEOF
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'FLUXEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/fg_bg" />
+              <foreground android:drawable="@drawable/ic_fg" />
+          </adaptive-icon>
+          FLUXEOF
+          cat > app/src/main/res/drawable/ic_fg.xml <<'FLUXEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path
+                  android:fillColor="#3300E5FF"
+                  android:strokeColor="#FF00E5FF"
+                  android:strokeWidth="3"
+                  android:strokeLineJoin="round"
+                  android:pathData="M54,24 L78,32 L78,54 C78,68 66,78 54,84 C42,78 30,68 30,54 L30,32 Z" />
+              <path
+                  android:fillColor="#00000000"
+                  android:strokeColor="#FF00E5FF"
+                  android:strokeWidth="5"
+                  android:strokeLineCap="round"
+                  android:strokeLineJoin="round"
+                  android:pathData="M42,54 L51,63 L67,44" />
+          </vector>
+          FLUXEOF
+          cat > app/src/main/java/com/fluxguard/app/MainActivity.kt <<'FLUXEOF'
+          package com.fluxguard.app
+
+          import android.content.Context
+          import android.content.Intent
+          import android.net.Uri
+          import android.os.Bundle
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.BackHandler
+          import androidx.activity.compose.setContent
+          import androidx.compose.animation.*
+          import androidx.compose.animation.core.*
+          import androidx.compose.foundation.*
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.lazy.LazyColumn
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.draw.alpha
+          import androidx.compose.ui.draw.clip
+          import androidx.compose.ui.geometry.Offset
+          import androidx.compose.ui.geometry.Size
+          import androidx.compose.ui.graphics.*
+          import androidx.compose.ui.graphics.drawscope.Stroke
+          import androidx.compose.ui.graphics.drawscope.rotate
+          import androidx.compose.ui.platform.LocalContext
+          import androidx.compose.ui.text.TextStyle
+          import androidx.compose.ui.text.font.FontFamily
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.text.style.TextAlign
+          import androidx.compose.ui.text.style.TextOverflow
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.delay
+          import kotlinx.coroutines.launch
+          import kotlinx.coroutines.withContext
+          import kotlin.math.cos
+          import kotlin.math.sin
+          import kotlin.random.Random
+
+          val Cyan = Color(0xFF00E5FF)
+          val Green = Color(0xFF00E676)
+          val Red = Color(0xFFFF1744)
+          val Amber = Color(0xFFFFC400)
+          val Purple = Color(0xFF7C4DFF)
+          val BgTop = Color(0xFF050B18)
+          val BgBottom = Color(0xFF0A1A33)
+          val Muted = Color(0xFF8FA3BF)
+
+          class MainActivity : ComponentActivity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContent { FluxGuardApp() }
+              }
+          }
+
+          enum class Screen { HOME, SCAN, RESULT }
+
+          class LogLine(val id: Long, val text: String, val severity: Int)
+          class Blip(val angle: Float, val rad: Float, val severity: Int)
+
+          class ScanUiState {
+              var progress by mutableFloatStateOf(0f)
+              var phase by mutableIntStateOf(0)
+              var current by mutableStateOf("")
+              var scanned by mutableIntStateOf(0)
+              var total by mutableIntStateOf(0)
+              var threats by mutableIntStateOf(0)
+              var files by mutableIntStateOf(0)
+              val log = mutableStateListOf<LogLine>()
+              val blips = mutableStateListOf<Blip>()
+              private var nextId = 0L
+
+              fun reset() {
+                  progress = 0f; phase = 0; current = ""; scanned = 0; total = 0; threats = 0; files = 0
+                  log.clear(); blips.clear()
+              }
+
+              fun pushLog(t: String, sev: Int) {
+                  log.add(LogLine(nextId++, t, sev))
+                  while (log.size > 7) log.removeAt(0)
+              }
+
+              fun addBlip(sev: Int) {
+                  blips.add(Blip(Random.nextFloat() * 360f, 0.25f + Random.nextFloat() * 0.7f, sev))
+                  while (blips.size > 24) blips.removeAt(0)
+              }
+          }
+
+          suspend fun runScan(ctx: Context, ui: ScanUiState): ScanResult {
+              ui.reset()
+              // Faz 0: cihaz
+              ui.phase = 0
+              ui.current = "Cihaz güvenliği denetleniyor"
+              val sys = withContext(Dispatchers.Default) { Scanner.systemChecks(ctx) }
+              sys.forEachIndexed { i, f ->
+                  ui.pushLog((if (f.severity == 0) "✓ " else "! ") + f.title, f.severity)
+                  ui.addBlip(f.severity)
+                  ui.progress = 0.02f + 0.18f * (i + 1) / sys.size
+                  delay(420)
+              }
+
+              // Faz 1: uygulamalar
+              ui.phase = 1
+              val pkgs = withContext(Dispatchers.IO) { Scanner.listPackages(ctx) }
+              ui.total = pkgs.size
+              val risks = mutableListOf<AppRisk>()
+              pkgs.forEachIndexed { i, pi ->
+                  val a = withContext(Dispatchers.Default) { Scanner.analyze(ctx, pi) }
+                  ui.scanned = i + 1
+                  ui.progress = 0.20f + 0.62f * (i + 1) / pkgs.size
+                  if (!a.system) ui.current = a.label
+                  if (a.score >= 25) {
+                      risks.add(a)
+                      ui.threats = risks.size
+                      val sev = if (a.score >= 50) 2 else 1
+                      ui.pushLog("⚠ ${a.label}  %${a.score}", sev)
+                      ui.addBlip(sev)
+                      delay(160)
+                  } else if (!a.system) {
+                      ui.pushLog("✓ ${a.label}", 0)
+                      if (i % 3 == 0) ui.addBlip(0)
+                      delay(55)
+                  } else if (i % 8 == 0) {
+                      delay(10)
+                  }
+              }
+
+              // Faz 2: dosyalar
+              ui.phase = 2
+              ui.current = "İndirilen dosyalar taranıyor"
+              val apks = withContext(Dispatchers.IO) { Scanner.findApks() }
+              if (apks.isEmpty()) {
+                  ui.pushLog("✓ İndirilenlerde şüpheli APK yok", 0)
+                  delay(600)
+              } else {
+                  apks.take(6).forEach {
+                      ui.pushLog("⚠ APK dosyası: $it", 1)
+                      ui.addBlip(1)
+                      delay(320)
+                  }
+              }
+              ui.files = apks.size
+              ui.progress = 0.92f
+
+              // Faz 3: analiz
+              ui.phase = 3
+              ui.current = "Sonuçlar analiz ediliyor"
+              ui.pushLog("◆ Risk puanı hesaplanıyor...", 0)
+              for (k in 1..8) {
+                  ui.progress = 0.92f + 0.08f * k / 8f
+                  delay(130)
+              }
+              ui.progress = 1f
+              return Scanner.buildResult(pkgs.size, risks, sys, apks)
+          }
+
+          @Composable
+          fun FluxGuardApp() {
+              val ctx = LocalContext.current
+              val scope = rememberCoroutineScope()
+              var screen by remember { mutableStateOf(Screen.HOME) }
+              var result by remember { mutableStateOf<ScanResult?>(null) }
+              val ui = remember { ScanUiState() }
+
+              fun start() {
+                  screen = Screen.SCAN
+                  scope.launch {
+                      val r = runScan(ctx, ui)
+                      result = r
+                      delay(700)
+                      screen = Screen.RESULT
+                  }
+              }
+
+              BackHandler(enabled = screen == Screen.RESULT) { screen = Screen.HOME }
+
+              MaterialTheme(colorScheme = darkColorScheme()) {
+                  CompositionLocalProvider(LocalContentColor provides Color.White) {
+                      Box(
+                          Modifier
+                              .fillMaxSize()
+                              .background(Brush.verticalGradient(listOf(BgTop, BgBottom)))
+                      ) {
+                          ParticleBackground()
+                          AnimatedContent(
+                              targetState = screen,
+                              transitionSpec = { fadeIn(tween(500)) togetherWith fadeOut(tween(300)) },
+                              label = "screen"
+                          ) { s ->
+                              when (s) {
+                                  Screen.HOME -> HomeScreen(result) { start() }
+                                  Screen.SCAN -> ScanScreen(ui)
+                                  Screen.RESULT -> result?.let { ResultScreen(it) { start() } }
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun T(
+              text: String,
+              size: Int,
+              color: Color = Color.White,
+              weight: FontWeight = FontWeight.Normal,
+              mono: Boolean = false,
+              align: TextAlign? = null,
+              modifier: Modifier = Modifier,
+              maxLines: Int = Int.MAX_VALUE
+          ) {
+              Text(
+                  text, modifier = modifier, color = color, fontSize = size.sp, fontWeight = weight,
+                  fontFamily = if (mono) FontFamily.Monospace else null, textAlign = align,
+                  maxLines = maxLines, overflow = TextOverflow.Ellipsis
+              )
+          }
+
+          // ---------------------------------------------------------------- ARKA PLAN
+
+          class Particle(val x: Float, val y: Float, val speed: Int, val size: Float, val phase: Float)
+
+          @Composable
+          fun ParticleBackground() {
+              val ps = remember {
+                  List(46) {
+                      Particle(Random.nextFloat(), Random.nextFloat(), 1 + Random.nextInt(3), 1f + Random.nextFloat() * 2.5f, Random.nextFloat() * 6.28f)
+                  }
+              }
+              val inf = rememberInfiniteTransition(label = "bg")
+              val t by inf.animateFloat(0f, 1f, infiniteRepeatable(tween(24000, easing = LinearEasing)), label = "t")
+              Canvas(Modifier.fillMaxSize()) {
+                  val step = 48.dp.toPx()
+                  var x = 0f
+                  while (x < size.width) {
+                      drawLine(Cyan.copy(alpha = 0.04f), Offset(x, 0f), Offset(x, size.height))
+                      x += step
+                  }
+                  var y = 0f
+                  while (y < size.height) {
+                      drawLine(Cyan.copy(alpha = 0.04f), Offset(0f, y), Offset(size.width, y))
+                      y += step
+                  }
+                  val band = 60.dp.toPx()
+                  val sy = size.height * ((t * 3f) % 1f)
+                  drawRect(
+                      brush = Brush.verticalGradient(
+                          listOf(Color.Transparent, Cyan.copy(alpha = 0.10f), Color.Transparent),
+                          startY = sy - band, endY = sy + band
+                      ),
+                      topLeft = Offset(0f, sy - band),
+                      size = Size(size.width, band * 2)
+                  )
+                  ps.forEach { p ->
+                      var py = (p.y - t * p.speed) % 1f
+                      if (py < 0f) py += 1f
+                      val px = p.x + 0.02f * sin(p.phase + t * 6.2832f * p.speed)
+                      drawCircle(
+                          Cyan.copy(alpha = 0.15f + 0.25f * (p.size / 3.5f)),
+                          p.size.dp.toPx(),
+                          Offset(px * size.width, py * size.height)
+                      )
+                  }
+              }
+          }
+
+          // ---------------------------------------------------------------- KALKAN
+
+          @Composable
+          fun ShieldIcon(modifier: Modifier, color: Color, markProgress: Float, mark: Int) {
+              Canvas(modifier) {
+                  val w = size.width * 0.86f
+                  val h = size.height * 0.96f
+                  val cx = size.width / 2f
+                  val top = (size.height - h) / 2f
+                  val p = Path().apply {
+                      moveTo(cx, top)
+                      lineTo(cx + w / 2, top + h * 0.15f)
+                      lineTo(cx + w / 2, top + h * 0.5f)
+                      quadraticBezierTo(cx + w / 2, top + h * 0.85f, cx, top + h)
+                      quadraticBezierTo(cx - w / 2, top + h * 0.85f, cx - w / 2, top + h * 0.5f)
+                      lineTo(cx - w / 2, top + h * 0.15f)
+                      close()
+                  }
+                  drawPath(p, Brush.verticalGradient(listOf(color.copy(alpha = 0.40f), color.copy(alpha = 0.08f))))
+                  drawPath(p, color, style = Stroke(4.dp.toPx(), join = StrokeJoin.Round))
+                  if (mark == 0) {
+                      val cp = Path().apply {
+                          moveTo(cx - w * 0.22f, top + h * 0.50f)
+                          lineTo(cx - w * 0.05f, top + h * 0.66f)
+                          lineTo(cx + w * 0.26f, top + h * 0.36f)
+                      }
+                      val pm = PathMeasure()
+                      pm.setPath(cp, false)
+                      val seg = Path()
+                      pm.getSegment(0f, pm.length * markProgress, seg, true)
+                      drawPath(seg, color, style = Stroke(7.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                  } else {
+                      val lineEnd = top + h * 0.30f + h * 0.28f * markProgress
+                      drawLine(color, Offset(cx, top + h * 0.30f), Offset(cx, lineEnd), 8.dp.toPx(), StrokeCap.Round)
+                      drawCircle(color.copy(alpha = markProgress), 5.dp.toPx(), Offset(cx, top + h * 0.72f))
+                  }
+              }
+          }
+
+          // ---------------------------------------------------------------- ANA EKRAN
+
+          @Composable
+          fun ShimmerTitle(text: String, size: Int) {
+              val inf = rememberInfiniteTransition(label = "sh")
+              val x by inf.animateFloat(0f, 600f, infiniteRepeatable(tween(2200, easing = LinearEasing)), label = "x")
+              Text(
+                  text,
+                  style = TextStyle(
+                      brush = Brush.linearGradient(
+                          listOf(Cyan, Color.White, Purple, Cyan),
+                          start = Offset(x, 0f), end = Offset(x + 400f, 0f), tileMode = TileMode.Mirror
+                      ),
+                      fontSize = size.sp, fontWeight = FontWeight.Black, letterSpacing = 4.sp
+                  )
+              )
+          }
+
+          @Composable
+          fun HomeScreen(last: ScanResult?, onScan: () -> Unit) {
+              val inf = rememberInfiniteTransition(label = "home")
+              val breathe by inf.animateFloat(0.94f, 1.06f, infiniteRepeatable(tween(2200, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "b")
+              val spin by inf.animateFloat(0f, 360f, infiniteRepeatable(tween(14000, easing = LinearEasing)), label = "s")
+              val glow by inf.animateFloat(0.3f, 0.8f, infiniteRepeatable(tween(1800), RepeatMode.Reverse), label = "g")
+              val btn by inf.animateFloat(1f, 1.05f, infiniteRepeatable(tween(1100), RepeatMode.Reverse), label = "btn")
+
+              var entered by remember { mutableStateOf(false) }
+              LaunchedEffect(Unit) { entered = true }
+
+              Column(
+                  Modifier.fillMaxSize().padding(24.dp),
+                  horizontalAlignment = Alignment.CenterHorizontally,
+                  verticalArrangement = Arrangement.SpaceBetween
+              ) {
+                  Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(top = 24.dp)) {
+                      ShimmerTitle("FLUX GUARD", 32)
+                      Spacer(Modifier.height(6.dp))
+                      T("Akıllı Telefon Güvenliği", 14, Muted)
+                  }
+
+                  AnimatedVisibility(entered, enter = fadeIn(tween(900)) + scaleIn(tween(900), initialScale = 0.6f)) {
+                      Box(Modifier.size(280.dp), contentAlignment = Alignment.Center) {
+                          Canvas(Modifier.fillMaxSize()) {
+                              val r = size.minDimension / 2f
+                              drawCircle(
+                                  Brush.radialGradient(listOf(Cyan.copy(alpha = glow * 0.45f), Color.Transparent), center = center, radius = r),
+                                  radius = r, center = center
+                              )
+                              rotate(spin, center) {
+                                  drawCircle(
+                                      Cyan.copy(alpha = 0.55f), r * 0.88f, center,
+                                      style = Stroke(2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(18f, 14f)))
+                                  )
+                              }
+                              rotate(-spin * 1.5f, center) {
+                                  drawArc(
+                                      Purple.copy(alpha = 0.8f), 0f, 80f, false,
+                                      topLeft = Offset(center.x - r * 0.74f, center.y - r * 0.74f),
+                                      size = Size(r * 1.48f, r * 1.48f),
+                                      style = Stroke(4.dp.toPx(), cap = StrokeCap.Round)
+                                  )
+                              }
+                          }
+                          ShieldIcon(
+                              Modifier.size(140.dp).graphicsLayer { scaleX = breathe; scaleY = breathe },
+                              Cyan, 1f, 0
+                          )
+                      }
+                  }
+
+                  Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                          listOf("📱 Uygulama\nAnalizi", "⚙️ Cihaz\nDenetimi", "📂 Dosya\nTarama").forEach {
+                              Box(
+                                  Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(Color(0x14FFFFFF))
+                                      .border(1.dp, Cyan.copy(alpha = 0.25f), RoundedCornerShape(14.dp)).padding(vertical = 12.dp),
+                                  contentAlignment = Alignment.Center
+                              ) { T(it, 12, Color.White, FontWeight.Medium, align = TextAlign.Center) }
+                          }
+                      }
+                      Spacer(Modifier.height(18.dp))
+                      if (last != null) {
+                          T("Son tarama: güvenlik skoru ${last.score}/100", 13, Muted)
+                          Spacer(Modifier.height(10.dp))
+                      }
+                      Box(
+                          Modifier
+                              .fillMaxWidth()
+                              .graphicsLayer { scaleX = btn; scaleY = btn }
+                              .clip(RoundedCornerShape(32.dp))
+                              .background(Brush.horizontalGradient(listOf(Cyan, Purple)))
+                              .clickable { onScan() }
+                              .padding(vertical = 18.dp),
+                          contentAlignment = Alignment.Center
+                      ) { T(if (last == null) "TARAMAYI BAŞLAT" else "TEKRAR TARA", 17, Color(0xFF020611), FontWeight.Black) }
+                      Spacer(Modifier.height(10.dp))
+                  }
+              }
+          }
+
+          // ---------------------------------------------------------------- TARAMA EKRANI
+
+          @Composable
+          fun Radar(ui: ScanUiState, modifier: Modifier) {
+              val inf = rememberInfiniteTransition(label = "radar")
+              val sweep by inf.animateFloat(0f, 360f, infiniteRepeatable(tween(2600, easing = LinearEasing)), label = "sweep")
+              val pulse by inf.animateFloat(0f, 1f, infiniteRepeatable(tween(2400, easing = LinearEasing)), label = "pulse")
+              val prog by animateFloatAsState(ui.progress, tween(400), label = "p")
+
+              Box(modifier, contentAlignment = Alignment.Center) {
+                  Canvas(Modifier.fillMaxSize()) {
+                      val c = center
+                      val r = size.minDimension / 2f * 0.72f
+
+                      for (i in 0..2) {
+                          val p = (pulse + i / 3f) % 1f
+                          drawCircle(Cyan.copy(alpha = (1f - p) * 0.35f), r * (0.95f + p * 0.45f), c, style = Stroke(2.dp.toPx()))
+                      }
+
+                      drawCircle(Color(0xFF06142B), r, c)
+                      for (k in 1..3) drawCircle(Cyan.copy(alpha = 0.25f), r * k / 3f, c, style = Stroke(1.dp.toPx()))
+                      drawLine(Cyan.copy(alpha = 0.18f), Offset(c.x - r, c.y), Offset(c.x + r, c.y))
+                      drawLine(Cyan.copy(alpha = 0.18f), Offset(c.x, c.y - r), Offset(c.x, c.y + r))
+
+                      rotate(sweep, c) {
+                          drawCircle(
+                              brush = Brush.sweepGradient(
+                                  0f to Color.Transparent,
+                                  0.7f to Color.Transparent,
+                                  1f to Cyan.copy(alpha = 0.55f),
+                                  center = c
+                              ),
+                              radius = r, center = c
+                          )
+                          drawLine(Cyan, c, Offset(c.x + r, c.y), 2.dp.toPx())
+                      }
+
+                      val bl = ui.blips.toList()
+                      bl.forEachIndexed { i, b ->
+                          val a = Math.toRadians(b.angle.toDouble())
+                          val pos = Offset(c.x + (cos(a) * b.rad * r).toFloat(), c.y + (sin(a) * b.rad * r).toFloat())
+                          val col = when (b.severity) { 0 -> Green; 1 -> Amber; else -> Red }
+                          val al = 0.25f + 0.75f * (i + 1) / bl.size
+                          drawCircle(col.copy(alpha = al * 0.3f), 11.dp.toPx(), pos)
+                          drawCircle(col.copy(alpha = al), 4.dp.toPx(), pos)
+                      }
+
+                      drawCircle(Color(0xEE050B18), r * 0.3f, c)
+                      drawCircle(Cyan.copy(alpha = 0.5f), r * 0.3f, c, style = Stroke(1.5f.dp.toPx()))
+
+                      val ar = r * 1.15f
+                      val tl = Offset(c.x - ar, c.y - ar)
+                      val sz = Size(ar * 2, ar * 2)
+                      drawArc(Cyan.copy(alpha = 0.12f), 0f, 360f, false, tl, sz, style = Stroke(6.dp.toPx()))
+                      rotate(-90f, c) {
+                          drawArc(
+                              brush = Brush.sweepGradient(listOf(Cyan, Purple, Cyan), center = c),
+                              startAngle = 0f, sweepAngle = 360f * prog, useCenter = false,
+                              topLeft = tl, size = sz,
+                              style = Stroke(6.dp.toPx(), cap = StrokeCap.Round)
+                          )
+                      }
+                  }
+                  Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                      T("${(prog * 100).toInt()}%", 30, Color.White, FontWeight.Bold)
+                  }
+              }
+          }
+
+          @Composable
+          fun PhaseChips(phase: Int) {
+              val names = listOf("Cihaz", "Uygulama", "Dosya", "Analiz")
+              val inf = rememberInfiniteTransition(label = "ph")
+              val a by inf.animateFloat(0.4f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "a")
+              Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                  names.forEachIndexed { i, n ->
+                      val done = phase > i
+                      val act = phase == i
+                      val col = if (done) Green else if (act) Cyan else Color(0xFF55657A)
+                      Box(
+                          Modifier
+                              .clip(RoundedCornerShape(20.dp))
+                              .background(col.copy(alpha = if (act) 0.25f * a else 0.14f))
+                              .border(1.dp, col.copy(alpha = if (act) a else 0.6f), RoundedCornerShape(20.dp))
+                              .padding(horizontal = 12.dp, vertical = 6.dp)
+                      ) { T((if (done) "✓ " else "") + n, 12, col, FontWeight.SemiBold) }
+                  }
+              }
+          }
+
+          @Composable
+          fun StatCard(label: String, value: Int, color: Color, modifier: Modifier) {
+              Column(
+                  modifier
+                      .clip(RoundedCornerShape(14.dp))
+                      .background(Color(0x14FFFFFF))
+                      .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                      .padding(vertical = 10.dp),
+                  horizontalAlignment = Alignment.CenterHorizontally
+              ) {
+                  AnimatedContent(
+                      targetState = value,
+                      transitionSpec = { (slideInVertically { -it } + fadeIn()) togetherWith (slideOutVertically { it } + fadeOut()) },
+                      label = "v"
+                  ) { v -> T("$v", 24, color, FontWeight.Bold) }
+                  T(label, 11, Muted)
+              }
+          }
+
+          @Composable
+          fun LogTerminal(ui: ScanUiState, modifier: Modifier) {
+              val inf = rememberInfiniteTransition(label = "cur")
+              val blink by inf.animateFloat(0f, 1f, infiniteRepeatable(tween(500), RepeatMode.Reverse), label = "bl")
+              Column(
+                  modifier
+                      .fillMaxWidth()
+                      .clip(RoundedCornerShape(14.dp))
+                      .background(Color(0xCC020611))
+                      .border(1.dp, Cyan.copy(alpha = 0.3f), RoundedCornerShape(14.dp))
+                      .padding(12.dp),
+                  verticalArrangement = Arrangement.Bottom
+              ) {
+                  val n = ui.log.size
+                  ui.log.forEachIndexed { i, l ->
+                      val c = when (l.severity) { 0 -> Green; 1 -> Amber; else -> Red }
+                      T(l.text, 12, c.copy(alpha = 0.35f + 0.65f * (i + 1) / n), mono = true, maxLines = 1)
+                  }
+                  T("> ${ui.current}█", 12, Cyan, mono = true, maxLines = 1, modifier = Modifier.alpha(0.4f + 0.6f * blink))
+              }
+          }
+
+          @Composable
+          fun ScanScreen(ui: ScanUiState) {
+              val inf = rememberInfiniteTransition(label = "dots")
+              val d by inf.animateFloat(0f, 4f, infiniteRepeatable(tween(1600, easing = LinearEasing)), label = "d")
+              Column(
+                  Modifier.fillMaxSize().padding(20.dp),
+                  horizontalAlignment = Alignment.CenterHorizontally
+              ) {
+                  ShimmerTitle("FLUX GUARD", 24)
+                  Spacer(Modifier.height(4.dp))
+                  T("Tarama sürüyor" + ".".repeat(d.toInt().coerceAtMost(3)), 13, Muted)
+                  Spacer(Modifier.height(10.dp))
+                  Radar(ui, Modifier.size(290.dp))
+                  Spacer(Modifier.height(10.dp))
+                  PhaseChips(ui.phase)
+                  Spacer(Modifier.height(12.dp))
+                  Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                      StatCard("Taranan", ui.scanned, Cyan, Modifier.weight(1f))
+                      StatCard("Riskli", ui.threats, if (ui.threats > 0) Red else Green, Modifier.weight(1f))
+                      StatCard("Dosya", ui.files, Amber, Modifier.weight(1f))
+                  }
+                  Spacer(Modifier.height(12.dp))
+                  LogTerminal(ui, Modifier.weight(1f))
+              }
+          }
+
+          // ---------------------------------------------------------------- SONUÇ
+
+          class ResItem(val title: String, val sub: String, val sev: Int, val details: List<String>, val pkg: String?, val order: Int)
+
+          @Composable
+          fun ResultCard(item: ResItem) {
+              val ctx = LocalContext.current
+              var vis by remember { mutableStateOf(false) }
+              var open by remember { mutableStateOf(false) }
+              LaunchedEffect(Unit) {
+                  delay(minOf(item.order, 12) * 80L)
+                  vis = true
+              }
+              val col = when (item.sev) { 0 -> Green; 1 -> Amber; else -> Red }
+              val tag = when (item.sev) { 0 -> "İYİ"; 1 -> "DİKKAT"; else -> "RİSKLİ" }
+              AnimatedVisibility(vis, enter = fadeIn(tween(400)) + slideInVertically(tween(400)) { it / 2 }) {
+                  Column(
+                      Modifier
+                          .fillMaxWidth()
+                          .padding(vertical = 5.dp)
+                          .clip(RoundedCornerShape(16.dp))
+                          .background(Color(0x14FFFFFF))
+                          .border(1.dp, col.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                          .clickable { open = !open }
+                          .padding(14.dp)
+                          .animateContentSize()
+                  ) {
+                      Row(verticalAlignment = Alignment.CenterVertically) {
+                          Box(Modifier.size(10.dp).clip(RoundedCornerShape(5.dp)).background(col))
+                          Spacer(Modifier.width(10.dp))
+                          Column(Modifier.weight(1f)) {
+                              T(item.title, 15, Color.White, FontWeight.SemiBold, maxLines = 1)
+                              T(item.sub, 12, Muted, maxLines = if (open) 6 else 1)
+                          }
+                          Spacer(Modifier.width(8.dp))
+                          T(tag, 11, col, FontWeight.Bold)
+                      }
+                      if (open && (item.details.isNotEmpty() || item.pkg != null)) {
+                          Spacer(Modifier.height(8.dp))
+                          item.details.forEach { T("• $it", 12, Color(0xFFCBD7E8)) }
+                          if (item.pkg != null) {
+                              Spacer(Modifier.height(10.dp))
+                              Box(
+                                  Modifier.clip(RoundedCornerShape(12.dp)).background(Red.copy(alpha = 0.2f))
+                                      .border(1.dp, Red, RoundedCornerShape(12.dp))
+                                      .clickable {
+                                          try {
+                                              ctx.startActivity(
+                                                  Intent(Intent.ACTION_DELETE, Uri.parse("package:${item.pkg}"))
+                                                      .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                              )
+                                          } catch (e: Exception) {
+                                          }
+                                      }
+                                      .padding(horizontal = 16.dp, vertical = 8.dp)
+                              ) { T("Uygulamayı Kaldır", 13, Red, FontWeight.Bold) }
+                          }
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun ResultScreen(r: ScanResult, onAgain: () -> Unit) {
+              val score = r.score
+              val col = if (score >= 80) Green else if (score >= 50) Amber else Red
+              val title = if (score >= 80) "Cihazın Güvende" else if (score >= 50) "Dikkat Gerekli" else "Risk Tespit Edildi"
+
+              val anim = remember { Animatable(0f) }
+              val check = remember { Animatable(0f) }
+              LaunchedEffect(Unit) {
+                  launch { anim.animateTo(score.toFloat(), tween(1800, easing = FastOutSlowInEasing)) }
+                  delay(500)
+                  check.animateTo(1f, tween(900))
+              }
+
+              var order = 0
+              val appItems = r.apps.map {
+                  ResItem(it.label, it.pkg + "  •  risk %" + it.score, if (it.score >= 50) 2 else 1, it.reasons, it.pkg, order++)
+              }
+              val sysItems = r.system.map { ResItem(it.title, it.detail, it.severity, emptyList(), null, order++) }
+              val fileItems = r.apkFiles.map {
+                  ResItem(it, "İndirilenlerde APK dosyası. Tanımadığın kaynaktansa silmeni öneririz.", 1, emptyList(), null, order++)
+              }
+
+              Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
+                  Spacer(Modifier.height(20.dp))
+                  Box(Modifier.size(200.dp).align(Alignment.CenterHorizontally), contentAlignment = Alignment.Center) {
+                      Canvas(Modifier.fillMaxSize()) {
+                          val st = 14.dp.toPx()
+                          val tl = Offset(st, st)
+                          val sz = Size(size.width - st * 2, size.height - st * 2)
+                          drawArc(col.copy(alpha = 0.12f), 0f, 360f, false, tl, sz, style = Stroke(st))
+                          drawArc(col.copy(alpha = 0.25f), -90f, 360f * anim.value / 100f, false, tl, sz, style = Stroke(st * 1.9f, cap = StrokeCap.Round))
+                          drawArc(col, -90f, 360f * anim.value / 100f, false, tl, sz, style = Stroke(st, cap = StrokeCap.Round))
+                      }
+                      Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                          T("${anim.value.toInt()}", 56, col, FontWeight.Black)
+                          T("güvenlik skoru", 12, Muted)
+                      }
+                  }
+                  Spacer(Modifier.height(8.dp))
+                  Row(Modifier.align(Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
+                      ShieldIcon(Modifier.size(34.dp), col, check.value, if (score >= 50) 0 else 1)
+                      Spacer(Modifier.width(10.dp))
+                      T(title, 22, Color.White, FontWeight.Bold)
+                  }
+                  Spacer(Modifier.height(12.dp))
+                  Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                      StatCard("Taranan", r.totalApps, Cyan, Modifier.weight(1f))
+                      StatCard("Riskli", r.apps.size, if (r.apps.isEmpty()) Green else Red, Modifier.weight(1f))
+                      StatCard("Cihaz uyarısı", r.system.count { it.severity > 0 }, Amber, Modifier.weight(1f))
+                  }
+                  Spacer(Modifier.height(8.dp))
+                  LazyColumn(Modifier.weight(1f)) {
+                      item { SectionTitle("Uygulama Riskleri") }
+                      if (appItems.isEmpty()) {
+                          item { ResultCard(ResItem("Riskli uygulama bulunamadı", "Yüklü uygulamalarında şüpheli davranış tespit edilmedi.", 0, emptyList(), null, 0)) }
+                      } else {
+                          items(appItems.size) { ResultCard(appItems[it]) }
+                      }
+                      item { SectionTitle("Cihaz Güvenliği") }
+                      items(sysItems.size) { ResultCard(sysItems[it]) }
+                      if (fileItems.isNotEmpty()) {
+                          item { SectionTitle("Şüpheli Dosyalar") }
+                          items(fileItems.size) { ResultCard(fileItems[it]) }
+                      }
+                      item {
+                          Spacer(Modifier.height(10.dp))
+                          T(
+                              "Not: Flux Guard izin ve davranış tabanlı analiz yapar; imza veritabanlı bir antivirüs değildir. Risk puanı bir ihtimaldir, kesin zararlı hükmü değildir.",
+                              11, Muted
+                          )
+                          Spacer(Modifier.height(10.dp))
+                      }
+                  }
+                  Box(
+                      Modifier
+                          .fillMaxWidth()
+                          .padding(vertical = 12.dp)
+                          .clip(RoundedCornerShape(28.dp))
+                          .background(Brush.horizontalGradient(listOf(Cyan, Purple)))
+                          .clickable { onAgain() }
+                          .padding(vertical = 15.dp),
+                      contentAlignment = Alignment.Center
+                  ) { T("TEKRAR TARA", 16, Color(0xFF020611), FontWeight.Black) }
+              }
+          }
+
+          @Composable
+          fun SectionTitle(text: String) {
+              Spacer(Modifier.height(10.dp))
+              T(text.uppercase(), 12, Cyan, FontWeight.Bold)
+              Spacer(Modifier.height(4.dp))
+          }
+          FLUXEOF
+          cat > app/src/main/java/com/fluxguard/app/Scanner.kt <<'FLUXEOF'
+          package com.fluxguard.app
+
+          import android.app.KeyguardManager
+          import android.content.Context
+          import android.content.pm.ApplicationInfo
+          import android.content.pm.PackageInfo
+          import android.content.pm.PackageManager
+          import android.os.Build
+          import android.os.Environment
+          import android.provider.Settings
+          import java.io.File
+          import java.time.LocalDate
+          import java.time.temporal.ChronoUnit
+
+          /** severity: 0 = iyi, 1 = dikkat, 2 = riskli */
+          data class Finding(val title: String, val detail: String, val severity: Int)
+
+          data class AppRisk(
+              val label: String,
+              val pkg: String,
+              val score: Int,
+              val reasons: List<String>,
+              val system: Boolean
+          )
+
+          class ScanResult(
+              val apps: List<AppRisk>,
+              val system: List<Finding>,
+              val apkFiles: List<String>,
+              val totalApps: Int,
+              val score: Int
+          )
+
+          object Scanner {
+
+              private val trustedInstallers = setOf(
+                  "com.android.vending",
+                  "com.sec.android.app.samsungapps",
+                  "com.huawei.appmarket",
+                  "com.xiaomi.mipicks",
+                  "com.heytap.market",
+                  "com.amazon.venezia"
+              )
+
+              private val badNames = listOf(
+                  "keylog", "spyware", "spy", "trojan", "stealth", "rootkit", "payload", "remote access"
+              )
+
+              fun listPackages(ctx: Context): List<PackageInfo> {
+                  val pm = ctx.packageManager
+                  val all = try {
+                      pm.getInstalledPackages(0)
+                  } catch (e: Exception) {
+                      emptyList()
+                  }
+                  // kullanıcı uygulamaları önce, sistem uygulamaları sonra
+                  return all.sortedBy { if (isSystem(it)) 1 else 0 }
+              }
+
+              private fun isSystem(pi: PackageInfo): Boolean {
+                  val f = pi.applicationInfo?.flags ?: return false
+                  val sys = f and ApplicationInfo.FLAG_SYSTEM != 0
+                  val upd = f and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP != 0
+                  return sys && !upd
+              }
+
+              private fun installer(pm: PackageManager, pkg: String): String? = try {
+                  if (Build.VERSION.SDK_INT >= 30) {
+                      pm.getInstallSourceInfo(pkg).installingPackageName
+                  } else {
+                      @Suppress("DEPRECATION")
+                      pm.getInstallerPackageName(pkg)
+                  }
+              } catch (e: Exception) {
+                  null
+              }
+
+              fun analyze(ctx: Context, pi: PackageInfo): AppRisk {
+                  val pm = ctx.packageManager
+                  if (isSystem(pi) || pi.packageName == ctx.packageName) {
+                      return AppRisk(pi.packageName, pi.packageName, 0, emptyList(), true)
+                  }
+                  val full = try {
+                      pm.getPackageInfo(
+                          pi.packageName,
+                          PackageManager.GET_PERMISSIONS or PackageManager.GET_SERVICES or PackageManager.GET_RECEIVERS
+                      )
+                  } catch (e: Exception) {
+                      pi
+                  }
+                  val ai = full.applicationInfo
+                  val label = try {
+                      if (ai != null) pm.getApplicationLabel(ai).toString() else pi.packageName
+                  } catch (e: Exception) {
+                      pi.packageName
+                  }
+
+                  val perms = full.requestedPermissions?.toSet() ?: emptySet()
+                  var score = 0
+                  val why = mutableListOf<String>()
+
+                  val inst = installer(pm, pi.packageName)
+                  val trusted = inst != null && inst in trustedInstallers
+                  if (!trusted) {
+                      score += 20
+                      why += "Resmi mağaza dışından yüklenmiş" + (if (inst != null) " ($inst)" else "")
+                  }
+
+                  fun has(p: String) = perms.contains("android.permission.$p")
+
+                  val svc = full.services?.mapNotNull { it.permission }?.toSet() ?: emptySet()
+                  val rcv = full.receivers?.mapNotNull { it.permission }?.toSet() ?: emptySet()
+
+                  if ("android.permission.BIND_ACCESSIBILITY_SERVICE" in svc) {
+                      score += 25; why += "Erişilebilirlik servisi kullanıyor (ekranı okuyup kontrol edebilir)"
+                  }
+                  if ("android.permission.BIND_DEVICE_ADMIN" in rcv) {
+                      score += 20; why += "Cihaz yöneticisi yetkisi istiyor (kaldırılması zorlaşabilir)"
+                  }
+                  if ("android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" in svc) {
+                      score += 12; why += "Bildirimlerini okuyabiliyor (SMS/doğrulama kodları dahil)"
+                  }
+                  if (has("SYSTEM_ALERT_WINDOW")) {
+                      score += 12; why += "Diğer uygulamaların üstüne çizim yapabiliyor"
+                  }
+                  if (has("SEND_SMS") || has("READ_SMS") || has("RECEIVE_SMS")) {
+                      score += 15; why += "SMS okuma/gönderme yetkisi"
+                  }
+                  if (has("READ_CALL_LOG")) {
+                      score += 8; why += "Arama geçmişini okuyabiliyor"
+                  }
+                  if (has("REQUEST_INSTALL_PACKAGES")) {
+                      score += 8; why += "Başka uygulama yükleyebiliyor"
+                  }
+                  if (has("MANAGE_EXTERNAL_STORAGE")) {
+                      score += 8; why += "Tüm dosyalara erişim istiyor"
+                  }
+                  if (has("RECORD_AUDIO") && has("CAMERA")) {
+                      score += 6; why += "Mikrofon + kamera erişimi"
+                  }
+                  if (has("ACCESS_BACKGROUND_LOCATION")) {
+                      score += 6; why += "Arka planda konum takibi"
+                  }
+                  if (perms.size > 40) {
+                      score += 6; why += "Çok fazla izin istiyor (${perms.size})"
+                  }
+                  if (ai != null && ai.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+                      score += 10; why += "Debug modunda derlenmiş uygulama"
+                  }
+                  val lower = (label + " " + pi.packageName).lowercase()
+                  val bad = badNames.firstOrNull { lower.contains(it) }
+                  if (bad != null) {
+                      score += 30; why += "Şüpheli isim deseni: \"$bad\""
+                  }
+
+                  if (trusted) score = score / 2
+                  return AppRisk(label, pi.packageName, score.coerceIn(0, 100), why, false)
+              }
+
+              fun systemChecks(ctx: Context): List<Finding> {
+                  val out = mutableListOf<Finding>()
+                  try {
+                      val km = ctx.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+                      out += if (km.isDeviceSecure)
+                          Finding("Ekran kilidi aktif", "PIN, desen veya parmak izi ile korunuyor.", 0)
+                      else
+                          Finding("Ekran kilidi yok", "Telefon kilitsiz. Ayarlar'dan bir PIN veya desen belirle.", 2)
+                  } catch (e: Exception) {
+                  }
+
+                  val cr = ctx.contentResolver
+                  val adb = try { Settings.Global.getInt(cr, Settings.Global.ADB_ENABLED, 0) == 1 } catch (e: Exception) { false }
+                  out += if (adb)
+                      Finding("USB hata ayıklama açık", "Kapalı olması daha güvenli. Geliştirici seçeneklerinden kapat.", 1)
+                  else
+                      Finding("USB hata ayıklama kapalı", "Bilgisayar üzerinden izinsiz erişim kapalı.", 0)
+
+                  val dev = try { Settings.Global.getInt(cr, Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) == 1 } catch (e: Exception) { false }
+                  if (dev) out += Finding("Geliştirici seçenekleri açık", "Kullanmıyorsan kapatman önerilir.", 1)
+
+                  val rootPaths = listOf(
+                      "/system/bin/su", "/system/xbin/su", "/sbin/su", "/su/bin/su",
+                      "/system/app/Superuser.apk", "/data/local/bin/su"
+                  )
+                  val rooted = rootPaths.any { File(it).exists() } || (Build.TAGS?.contains("test-keys") == true)
+                  out += if (rooted)
+                      Finding("Root belirtisi bulundu", "Cihaz root'lu olabilir; zararlı uygulamalar tam yetki alabilir.", 2)
+                  else
+                      Finding("Root belirtisi yok", "Sistem bütünlüğü normal görünüyor.", 0)
+
+                  try {
+                      val patch = Build.VERSION.SECURITY_PATCH
+                      val days = ChronoUnit.DAYS.between(LocalDate.parse(patch), LocalDate.now())
+                      out += if (days > 365)
+                          Finding("Güvenlik yaması eski", "Son yama $patch ($days gün önce). Sistem güncellemesi yap.", 1)
+                      else
+                          Finding("Güvenlik yaması güncel", "Son yama: $patch", 0)
+                  } catch (e: Exception) {
+                  }
+
+                  out += if (Build.VERSION.SDK_INT < 29)
+                      Finding("Android sürümü eski", "Android ${Build.VERSION.RELEASE} artık güvenlik desteği almıyor olabilir.", 1)
+                  else
+                      Finding("Android sürümü destekleniyor", "Android ${Build.VERSION.RELEASE}", 0)
+                  return out
+              }
+
+              fun findApks(): List<String> {
+                  val out = mutableListOf<String>()
+                  try {
+                      @Suppress("DEPRECATION")
+                      val dirs = listOf(
+                          Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                          Environment.getExternalStorageDirectory()
+                      )
+                      for (d in dirs) {
+                          d.listFiles()?.forEach {
+                              if (it.isFile && it.name.endsWith(".apk", true)) out.add(it.name)
+                          }
+                      }
+                  } catch (e: Exception) {
+                  }
+                  return out.distinct()
+              }
+
+              fun buildResult(total: Int, apps: List<AppRisk>, sys: List<Finding>, apks: List<String>): ScanResult {
+                  var s = 100
+                  apps.forEach { s -= if (it.score >= 50) 12 else 4 }
+                  sys.forEach { s -= when (it.severity) { 2 -> 15; 1 -> 6; else -> 0 } }
+                  s -= minOf(apks.size * 3, 9)
+                  return ScanResult(apps.sortedByDescending { it.score }, sys, apks, total, s.coerceIn(0, 100))
+              }
+          }
+          FLUXEOF
+
+      - name: Gradle kur
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: APK derle
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: APK yeniden adlandir
+        run: cp app/build/outputs/apk/debug/app-debug.apk FluxGuard.apk
+
+      - name: Artifact yukle
+        uses: actions/upload-artifact@v4
+        with:
+          name: FluxGuard-APK
+          path: FluxGuard.apk
+
+      - name: Release olustur (telefondan indirmek icin)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: flux-guard-${{ github.run_number }}
+          name: Flux Guard v${{ github.run_number }}
+          files: FluxGuard.apk
